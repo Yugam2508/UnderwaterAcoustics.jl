@@ -295,16 +295,14 @@ end
   @test gradient(ℳ₃, AutoForwardDiff(), x) ≈ gradient(ℳ₃, fd, x)
   @test gradient(ℳ₁, AutoZygote(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoZygote(), x) ≈ gradient(ℳ₂, fd, x)
-  # FIXME broken (originally due to https://github.com/SciML/NonlinearSolve.jl/issues/581)
-  # @test gradient(ℳ₃, AutoZygote(), x) ≈ gradient(ℳ₃, fd, x)
+  @test gradient(ℳ₃, AutoZygote(), x) ≈ gradient(ℳ₃, fd, x)
   x = [25.0, 200.0, 10.0, 8.0, 1000.0, 1540.0]
   @test gradient(ℳ₁, AutoForwardDiff(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoForwardDiff(), x) ≈ gradient(ℳ₂, fd, x)
   @test gradient(ℳ₃, AutoForwardDiff(), x) ≈ gradient(ℳ₃, fd, x) atol=1e-4
   @test gradient(ℳ₁, AutoZygote(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoZygote(), x) ≈ gradient(ℳ₂, fd, x)
-  # FIXME broken (originally due to https://github.com/SciML/NonlinearSolve.jl/issues/581)
-  # @test gradient(ℳ₃, AutoZygote(), x) ≈ gradient(ℳ₃, fd, x)
+  @test gradient(ℳ₃, AutoZygote(), x) ≈ gradient(ℳ₃, fd, x) atol=1e-4
 end
 
 @testitem "pekeris-modes-adiabatic" begin
@@ -365,4 +363,29 @@ end
   @test [a.kᵣ for a ∈ arr1] == [a.kᵣ for a ∈ arr2]
   @test [a.v for a ∈ arr1] == [a.v for a ∈ arr2]
   @test [a.vₚ for a ∈ arr1] == [a.vₚ for a ∈ arr2]
+end
+
+@testitem "pekeris-modes-adiabatic-∂" begin
+  using DifferentiationInterface
+  import ForwardDiff, FiniteDifferences
+  fd = AutoFiniteDifferences(fdm=FiniteDifferences.central_fdm(5, 1))
+  function ℳ((D1, D2, R, d1, d2, f, c))
+    env = UnderwaterEnvironment(
+      bathymetry = SampledField([D1, D2, D1]; x=[0.0, 2000.0, 5000.0]),
+      soundspeed = c,
+      density = 1000,
+      seabed = FluidBoundary(2000, 2000)
+    )
+    pm = AdiabaticExt(PekerisModeSolver, env; dx=10.0, dz=0.1)
+    transmission_loss(pm, AcousticSource((x=0.0, z=-d1), f), AcousticReceiver((x=R, z=-d2)))
+  end
+  # parameters chosen off the internal integration/cache grids, away from mode cut-on/cut-off
+  x = [201.3, 151.7, 3013.7, 21.4, 141.3, 307.0, 1503.0]
+  ∇ℳ = gradient(ℳ, AutoForwardDiff(), x)
+  @test all(isfinite, ∇ℳ)
+  # transmission loss is discontinuous in the bathymetry samples (D1, D2) at finite-difference
+  # scale due to the internal depth-grid mode cache, so only the remaining components are
+  # compared against a finite-difference reference
+  @test ∇ℳ[3:7] ≈ gradient(ℳ, fd, x)[3:7] rtol=1e-4
+  # FIXME reverse mode (Zygote) unsupported: AdiabaticExt integration is mutation-heavy
 end

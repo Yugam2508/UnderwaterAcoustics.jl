@@ -1,5 +1,4 @@
 import SignalAnalysis: signal, db2pow, tukey
-import NonlinearSolve: IntervalNonlinearProblem, solve
 import DSP: nextfastfft
 import FFTW: ifft
 
@@ -27,6 +26,7 @@ struct PekerisRayTracer{T1,T2,T3,T4,T5,T6,T7,T8} <: AbstractRayPropagationModel
   max_bounces::Int  # maximum number of bounces
   function PekerisRayTracer(env; max_bounces=3)
     max_bounces ≥ 0 || error("Maximum number of bounces cannot be negative")
+    has_scatterers(env) && error("PekerisRayTracer does not support scatterers")
     is_isovelocity(env) || error("Environment must be iso-velocity")
     is_range_dependent(env) && error("Environment must be range independent")
     is_constant(env.temperature) || error("Temperature must be constant")
@@ -190,7 +190,9 @@ struct PekerisModeSolver{T1,T2,T3,T4,T5,T6,T7,T8} <: AbstractModePropagationMode
   ngrid::Int        # number of grid points for mode computation
   nmodes::Int       # maximum number of modes (0 for no limit)
   cache::Dict{Float64,Vector{Float64}}    # cached solutions ω -> γ
+  lock::ReentrantLock                     # protects cache during multithreaded access
   function PekerisModeSolver(env; ngrid=0, nmodes=0)
+    has_scatterers(env) && error("PekerisModeSolver does not support scatterers")
     is_isovelocity(env) || error("Environment must be iso-velocity")
     is_range_dependent(env) && error("Environment must be range independent")
     is_constant(env.temperature) || error("Temperature must be constant")
@@ -209,7 +211,7 @@ struct PekerisModeSolver{T1,T2,T3,T4,T5,T6,T7,T8} <: AbstractModePropagationMode
     pH = value(env.pH)
     ps = (h, c, ρ, T, S, pH, env.seabed, env.surface)
     cache = Dict{Float64,Vector{Float64}}()
-    new{typeof.(ps)...}(ps..., ngrid, nmodes, cache)
+    new{typeof.(ps)...}(ps..., ngrid, nmodes, cache, ReentrantLock())
   end
 end
 
@@ -240,17 +242,16 @@ function arrivals(pm::PekerisModeSolver, tx::AbstractAcousticSource)
       m = _mode(0, ω, 0.0, k₁, pm.c, pm.ρ, pm.seabed.c, pm.seabed.ρ, pm.h, log_a)
       return Vector{typeof(m)}(undef, 0)
     end
-    if haskey(pm.cache, ω)
-      γ = pm.cache[ω]
-    else
+    γ = _mode_cache_get(pm, ω)
+    if γ === nothing
       dk² = k₁^2 - k₂^2
       ngrid = pm.ngrid > 0 ? pm.ngrid : 2 * ceil(Int, pm.h * k₁ / π) + 1
       γgrid = range(0, sqrt(dk²) - sqrt(eps()); length=ngrid)
       cost = map(γ -> _arrivals_cost(γ, (pm, dk²)), γgrid)
       ndx = findall(i -> sign(cost[i+1]) * sign(cost[i]) < 0, 1:length(γgrid)-1)
       0 < pm.nmodes < length(ndx) && (ndx = ndx[1:pm.nmodes])
-      γ = [solve(IntervalNonlinearProblem{false}(_arrivals_cost, (γgrid[i], γgrid[i+1]), (pm, dk²))).u for i ∈ ndx]
-      ω isa Real && γ isa Vector{Float64} && (pm.cache[ω] = γ)
+      γ = [_solve_mode_γ(γgrid[i], γgrid[i+1], pm, dk²) for i ∈ ndx]
+      _mode_cache_put!(pm, ω, γ)
     end
     return _mode.(1:length(γ), ω, γ, k₁, pm.c, pm.ρ, pm.seabed.c, pm.seabed.ρ, pm.h, log_a)
   end
@@ -278,7 +279,7 @@ function acoustic_field(pm::PekerisModeSolver, tx::AbstractAcousticSource, rxs::
   γ = sqrt.(k² .- kᵣ.^2)
   map(rxs) do rx
     p2 = location(rx)
-    R = sqrt(abs2(p1.x - p2.x))
+    R = hypot(p1.x - p2.x, p1.y - p2.y)
     modal_terms = @. sin(γ * -p1.z) * sin(γ * -p2.z) * cis(-kᵣ * R) / sqrt(kᵣ)
     multiplier = cispi(-0.25) * 2 / pm.h * sqrt(2π / R)
     if mode === :coherent
@@ -337,7 +338,7 @@ function impulse_response(pm::AbstractModePropagationModel,
   isempty(arr) && return signal(ComplexF64[], fs)
   p1 = location(tx)
   p2 = location(rx)
-  R = abs(p1.x - p2.x)
+  R = hypot(p1.x - p2.x, p1.y - p2.y)
   Δt = R / maximum(a -> a.v, arr) - acausal
   apow = [abs2(cis(-R * a.kᵣ)) for a ∈ arr]
   θ = db2pow(-threshold)
@@ -410,3 +411,58 @@ function _mode(m, ω, γ, k, c, ρ, cb, ρb, D, log_a)
 end
 
 _arrivals_cost(γ, (pm, dk²)) = pm.seabed.ρ * γ * cos(γ * pm.h) + pm.ρ * sqrt(dk² - γ^2) * sin(γ * pm.h)
+
+# analytic ∂/∂γ of _arrivals_cost
+function _arrivals_cost′(γ, (pm, dk²))
+  pm.seabed.ρ * (cos(γ * pm.h) - γ * pm.h * sin(γ * pm.h)) +
+    pm.ρ * (pm.h * sqrt(dk² - γ^2) * cos(γ * pm.h) - γ / sqrt(dk² - γ^2) * sin(γ * pm.h))
+end
+
+# cache bookkeeping kept out of the AD path; marked non-differentiable in ChainRulesExt
+# (plain lock/unlock, no closure or try/finally, keeps this ForwardDiff-friendly)
+function _mode_cache_get(pm, ω)
+  lock(pm.lock)
+  γ = get(pm.cache, ω, nothing)
+  unlock(pm.lock)
+  γ
+end
+
+function _mode_cache_put!(pm, ω, γ)
+  if ω isa Real && γ isa Vector{Float64}
+    lock(pm.lock)
+    pm.cache[ω] = γ
+    unlock(pm.lock)
+  end
+  nothing
+end
+
+# find root of f in bracket (lo, hi); assumes f changes sign over the bracket
+function _bisect(f, lo::Float64, hi::Float64)
+  flo = f(lo)
+  flo == 0 && return lo
+  s = sign(flo)
+  for _ ∈ 1:64
+    mid = 0.5 * (lo + hi)
+    (mid == lo || mid == hi) && break
+    fmid = f(mid)
+    fmid == 0 && return mid
+    if sign(fmid) == s
+      lo = mid
+    else
+      hi = mid
+    end
+  end
+  0.5 * (lo + hi)
+end
+
+# solve _arrivals_cost(γ) = 0 in (γlo, γhi) on plain values, then apply one
+# Newton step with the original (possibly AD-tracked) parameters so that
+# derivatives propagate per the implicit function theorem
+function _solve_mode_γ(γlo, γhi, pm, dk²)
+  ρb = _undual(pm.seabed.ρ)
+  ρ = _undual(pm.ρ)
+  h = _undual(pm.h)
+  d = _undual(dk²)
+  γ₀ = _bisect(γ -> ρb * γ * cos(γ * h) + ρ * sqrt(d - γ^2) * sin(γ * h), _undual(γlo), _undual(γhi))
+  γ₀ - _arrivals_cost(γ₀, (pm, dk²)) / _arrivals_cost′(γ₀, (pm, dk²))
+end
