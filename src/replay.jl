@@ -1,4 +1,3 @@
-import MAT: matread
 import SignalAnalysis: duration, nchannels, SampledSignal, samples, signal
 import SignalAnalysis: framerate, nframes, resample, isanalytic, analytic, padded
 import Interpolations: interpolate, BSpline, Cubic, Line, OnGrid, scale, extrapolate
@@ -79,57 +78,21 @@ it is used to corrupt the received signals.
 
 Supported formats:
 - `.mat` (MATLAB) file in underwater acoustic channel repository (UACR) format.
-  See https://github.com/uwa-channels/ for details.
+  See https://github.com/uwa-channels/ for details. Loading `.mat` files
+  requires the `MAT` package to be loaded (`using MAT`).
 """
 function BasebandReplayChannel(filename::AbstractString; upsample=false, rxs=:, noise=nothing)
-  # TODO: support UACR noise models
-  if endswith(filename, ".mat")
-    data = matread(filename)
-    all(["version", "h_hat", "params"] .∈ Ref(keys(data))) || error("Bad channel file format")
-    data["version"] == 1.0 || @warn "Unsupported channel file version"
-    # the file stores h_hat in forward-delay order; the convolution consumes
-    # taps in reverse (see _apply_tvir!), so flip the delay axis on load.
-    h = reverse(data["h_hat"]; dims=1)
-    M = size(h, 2)
-    rxs === (:) && (rxs = 1:M)
-    ndims(rxs) == 0 && (rxs = [rxs])
-    h = h[:,rxs,:]
-    θ = Matrix{Float64}(undef, 0, 0)
-    φ = Matrix{Float64}(undef, 0, 0)
-    if haskey(data, "phi_hat")
-      φ_data = data["phi_hat"]
-      size(φ_data, 1) == M || error("Invalid phi_hat size")
-      φ = Float64.(transpose(φ_data[rxs,:]))
-    elseif haskey(data, "theta_hat")
-      θ_data = data["theta_hat"]
-      size(θ_data, 1) == M || error("Invalid theta_hat size")
-      θ = Float64.(transpose(θ_data[rxs,:]))
-    end
-    fs = data["params"]["fs_delay"]
-    fs_time = data["params"]["fs_time"]
-    fc = data["params"]["fc"]
-    f_resamp = haskey(data, "f_resamp") ? Float64(only(data["f_resamp"])) : 1.0
-    if upsample && fs != fs_time
-      step = 1
-      h = resample(h, fs / fs_time; dims=3)
-    else
-      step = round(Int, fs / fs_time)
-    end
-    # spec: size(phase, 2)/fs_delay == size(h_hat, 3)/fs_time  (phase spans the IR duration)
-    let nphase = size(φ, 1) > 0 ? size(φ, 1) : size(θ, 1)
-      if nphase > 0
-        dur_phase = nphase / fs
-        dur_h = size(data["h_hat"], 3) / fs_time
-        isapprox(dur_phase, dur_h; rtol=1e-3) ||
-          error("Phase/IR duration mismatch: phase spans $(round(dur_phase;digits=3))s, " *
-                "h_hat spans $(round(dur_h;digits=3))s (spec requires equal durations)")
-      end
-    end
-    return BasebandReplayChannel(h, θ, φ, fs, fc, step, f_resamp; noise)
-  else
-    error("Unsupported file format")
-  end
+  endswith(filename, ".mat") || error("Unsupported file format")
+  applicable(_load_mat_replay_channel, filename, upsample, rxs, noise) ||
+    error("Loading .mat replay channels requires the MAT package; run `using MAT` first")
+  _load_mat_replay_channel(filename, upsample, rxs, noise)
 end
+
+# implemented in MATExt
+function _load_mat_replay_channel end
+
+# implemented in MATExt
+function _load_mat_replay_channel end
 
 """
     transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noisy=true, fs=nothing, start=nothing)

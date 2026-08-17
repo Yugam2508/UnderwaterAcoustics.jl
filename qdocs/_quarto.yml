@@ -17,6 +17,7 @@ website:
       - text: <b>Guides</b>
       - pos.qmd
       - fields.qmd
+      - scatterers.qmd
       - ext.qmd
       - porting.qmd
       - python.qmd
@@ -37,6 +38,8 @@ website:
       - text: <b>AcousticsToolbox.jl</b>
       - bellhop.qmd
       - kraken.qmd
+      - bellhopjl.qmd
+      - krakenjl.qmd
       - orca.qmd
       - text: <b>AcousticRayTracers.jl</b>
       - raysolver.qmd

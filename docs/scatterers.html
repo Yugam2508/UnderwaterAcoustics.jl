@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 
 
-<title>Porting from v0.3 – UnderwaterAcoustics.jl</title>
+<title>Scatterers – UnderwaterAcoustics.jl</title>
 <style>
 code{white-space: pre-wrap;}
 span.smallcaps{font-variant: small-caps;}
@@ -58,7 +58,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </style>
 
 
-<script src="site_libs/quarto-nav/quarto-nav.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js" integrity="sha384-ZvpUoO/+PpLXR1lu4jmpXWu80pZlYUAfxl5NsBMWOEPSjUn/6Z/hRTt8+pR6L4N2" crossorigin="anonymous"></script><script src="site_libs/quarto-nav/quarto-nav.js"></script>
 <script src="site_libs/quarto-nav/headroom.min.js"></script>
 <script src="site_libs/clipboard/clipboard.min.js"></script>
 <script src="site_libs/quarto-search/autocomplete.umd.js"></script>
@@ -103,6 +103,9 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     "search-label": "Search"
   }
 }</script>
+<script src="https://cdn.jsdelivr.net/npm/requirejs@2.3.6/require.min.js" integrity="sha384-c9c+LnTbwQ3aujuU7ULEPVvgLs+Fn6fJUvIGTsuu1ZcCf11fiEubah0ttpca4ntM sha384-6V1/AdqZRWk1KAlWbKBlGhN7VG4iE/yAZcO6NZPMF8od0vukrvr0tg4qY6NSrItx" crossorigin="anonymous"></script>
+
+<script type="application/javascript">define('jquery', [],function() {return window.jQuery;})</script>
 
 
 <link rel="stylesheet" href="styles.css">
@@ -129,7 +132,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
       <button type="button" class="quarto-btn-toggle btn" data-bs-toggle="collapse" role="button" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">
         <i class="bi bi-layout-text-sidebar-reverse"></i>
       </button>
-        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./index.html"><b>UnderwaterAcoustics.jl</b></a></li><li class="breadcrumb-item"><a href="./porting.html">Porting from v0.3</a></li></ol></nav>
+        <nav class="quarto-page-breadcrumbs" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./index.html"><b>UnderwaterAcoustics.jl</b></a></li><li class="breadcrumb-item"><a href="./scatterers.html">Scatterers</a></li></ol></nav>
         <a class="flex-grow-1" role="navigation" data-bs-toggle="collapse" data-bs-target=".quarto-sidebar-collapse-item" aria-controls="quarto-sidebar" aria-expanded="false" aria-label="Toggle sidebar navigation" onclick="if (window.quartoToggleHeadroom) { window.quartoToggleHeadroom(); }">      
         </a>
     </div>
@@ -188,7 +191,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="./scatterers.html" class="sidebar-item-text sidebar-link">
+  <a href="./scatterers.html" class="sidebar-item-text sidebar-link active">
  <span class="menu-text">Scatterers</span></a>
   </div>
 </li>
@@ -200,7 +203,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </li>
           <li class="sidebar-item">
   <div class="sidebar-item-container"> 
-  <a href="./porting.html" class="sidebar-item-text sidebar-link active">
+  <a href="./porting.html" class="sidebar-item-text sidebar-link">
  <span class="menu-text">Porting from v0.3</span></a>
   </div>
 </li>
@@ -369,19 +372,18 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
     <h2 id="toc-title">On this page</h2>
    
   <ul>
-  <li><a href="#underwater-acoustics" id="toc-underwater-acoustics" class="nav-link active" data-scroll-target="#underwater-acoustics">Underwater acoustics</a></li>
-  <li><a href="#environment-description" id="toc-environment-description" class="nav-link" data-scroll-target="#environment-description">Environment description</a></li>
-  <li><a href="#propagation-modeling" id="toc-propagation-modeling" class="nav-link" data-scroll-target="#propagation-modeling">Propagation modeling</a></li>
-  <li><a href="#acoustic-simulations" id="toc-acoustic-simulations" class="nav-link" data-scroll-target="#acoustic-simulations">Acoustic simulations</a></li>
+  <li><a href="#objects-in-the-water-column" id="toc-objects-in-the-water-column" class="nav-link active" data-scroll-target="#objects-in-the-water-column">Objects in the water column</a></li>
+  <li><a href="#geometry-queries" id="toc-geometry-queries" class="nav-link" data-scroll-target="#geometry-queries">Geometry queries</a></li>
+  <li><a href="#custom-shapes" id="toc-custom-shapes" class="nav-link" data-scroll-target="#custom-shapes">Custom shapes</a></li>
   </ul>
 </nav>
     </div>
 <!-- main -->
 <main class="content" id="quarto-document-content">
 
-<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./index.html"><b>UnderwaterAcoustics.jl</b></a></li><li class="breadcrumb-item"><a href="./porting.html">Porting from v0.3</a></li></ol></nav>
+<header id="title-block-header" class="quarto-title-block default"><nav class="quarto-page-breadcrumbs quarto-title-breadcrumbs d-none d-lg-block" aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="./index.html"><b>UnderwaterAcoustics.jl</b></a></li><li class="breadcrumb-item"><a href="./scatterers.html">Scatterers</a></li></ol></nav>
 <div class="quarto-title">
-<h1 class="title">Porting from v0.3</h1>
+<h1 class="title">Scatterers</h1>
 </div>
 
 
@@ -398,139 +400,107 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </header>
 
 
-<p>The <code>UnderwaterAcoustics.jl</code> API was changed in <code>v0.4</code> to make it more flexible to accommodate more types of acoustic propagation models, and for improved readability. The changes are summarized below to aid in porting old code to the new version.</p>
-<section id="underwater-acoustics" class="level2">
-<h2 class="anchored" data-anchor-id="underwater-acoustics">Underwater acoustics</h2>
-<p>The following functions have been renamed:</p>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Old function name</th>
-<th>New function name</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>bubbleresonance</code></td>
-<td><code>bubble_resonance</code></td>
-</tr>
-<tr class="even">
-<td><code>indBperλ</code></td>
-<td><code>in_dBperλ</code></td>
-</tr>
-<tr class="odd">
-<td><code>reflectioncoef</code></td>
-<td><code>reflection_coef</code></td>
-</tr>
-<tr class="even">
-<td><code>surfaceloss</code></td>
-<td><code>surface_reflection_coef</code></td>
-</tr>
-<tr class="odd">
-<td><code>waterdensity</code></td>
-<td><code>water_density</code></td>
-</tr>
-</tbody>
-</table>
+<section id="objects-in-the-water-column" class="level2">
+<h2 class="anchored" data-anchor-id="objects-in-the-water-column">Objects in the water column</h2>
+<p>Most of the environmental description in <code>UnderwaterAcoustics.jl</code> deals with a stratified ocean bounded by the sea surface and the seabed. Sometimes we also wish to model discrete objects in the water column — a submerged target, a fish school, a bubble cloud, etc. Such objects are described as <strong>scatterers</strong>: objects with a geometric shape and an acoustic boundary condition on their surface. The environment only describes the geometry and the surface property — how a scatterer interacts with the sound field (including whether it is treated as impenetrable) is up to each propagation model.</p>
+<p>A scatterer is created from a shape and a boundary condition:</p>
+<div id="6" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>sc <span class="op">=</span> <span class="fu">Scatterer</span>(<span class="fu">Ellipse</span>(<span class="fl">500.0</span>, <span class="op">-</span><span class="fl">40.0</span>, <span class="fl">20.0</span>, <span class="fl">8.0</span>; θ<span class="op">=</span><span class="fl">30</span>u<span class="st">"°"</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<pre><code>Scatterer(Ellipse(x=500.0, z=-40.0, a=20.0, b=8.0, θ=0.5235987755982988), RigidBoundary)</code></pre>
+</div>
+</div>
+<p>The default boundary condition is a <code>RigidBoundary</code> (sound-hard object). Other boundary conditions may be specified, e.g.&nbsp;a <code>PressureReleaseBoundary</code> for a sound-soft object such as a bubble cloud:</p>
+<div id="8" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Scatterer</span>(<span class="fu">Ellipse</span>(<span class="fl">500.0</span>, <span class="op">-</span><span class="fl">40.0</span>, <span class="fl">20.0</span>, <span class="fl">8.0</span>), PressureReleaseBoundary)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<pre><code>Scatterer(Ellipse(x=500.0, z=-40.0, a=20.0, b=8.0), PressureReleaseBoundary)</code></pre>
+</div>
+</div>
+<p>The only shape currently shipped with <code>UnderwaterAcoustics.jl</code> is a 2-D <code>Ellipse</code> in the x–z plane, but arbitrary shapes may be defined by a parametric function of the boundary (see <a href="#custom-shapes">custom shapes</a> below), and 3-D shapes (e.g.&nbsp;ellipsoids) are expected to be added in the future.</p>
+<p>Scatterers are part of the environmental description:</p>
+<div id="10" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>env <span class="op">=</span> <span class="fu">UnderwaterEnvironment</span>(bathymetry<span class="op">=</span><span class="fl">100.0</span>, scatterers<span class="op">=</span>sc)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<pre><code>UnderwaterEnvironment(
+  bathymetry = 100.0, 
+  altimetry = 0.0, 
+  temperature = 27.0, 
+  salinity = 35.0, 
+  pH = 8.1, 
+  soundspeed = 1538.9235842, 
+  density = 1022.7198310217424, 
+  seabed = RigidBoundary, 
+  surface = PressureReleaseBoundary, 
+  scatterers = (Scatterer(Ellipse(x=500.0, z=-40.0, a=20.0, b=8.0, θ=0.5235987755982988), RigidBoundary)), 
+)</code></pre>
+</div>
+</div>
+<p>The <code>scatterers</code> keyword accepts a single scatterer, or a tuple/vector of scatterers. We can visualize the environment with the scatterer:</p>
+<div id="12" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(env; xlims<span class="op">=</span>(<span class="fl">0</span>, <span class="fl">1000</span>), size<span class="op">=</span>(<span class="fl">600</span>, <span class="fl">250</span>), dpi<span class="op">=</span><span class="fl">100</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-display" data-execution_count="1">
+<img src="data:image/png;base64,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">
+</div>
+</div>
+<div class="callout callout-style-default callout-warning callout-titled" title="Model support">
+<div class="callout-header d-flex align-content-center">
+<div class="callout-icon-container">
+<i class="callout-icon"></i>
+</div>
+<div class="callout-title-container flex-fill">
+<span class="screen-reader-only">Warning</span>Model support
+</div>
+</div>
+<div class="callout-body-container callout-body">
+<p>The built-in propagation models (<code>PekerisRayTracer</code>, <code>PekerisModeSolver</code>) do <strong>not</strong> support scattering, and refuse to work with environments containing scatterers. The scatterer description and its geometry API are intended for use by propagation models in other packages that compute scattering, e.g.&nbsp;<a href="./raysolver.html"><code>RaySolver</code></a> from <code>AcousticRayTracers.jl</code>.</p>
+<p>Models that support scatterers are expected to apply the boundary condition of the scatterer under a local tangent-plane (Kirchhoff) approximation, i.e., apply the reflection coefficient of the boundary using the local surface normal at each interaction point. This approximation is valid when the local radius of curvature of the scatterer is much larger than the acoustic wavelength.</p>
+</div>
+</div>
 </section>
-<section id="environment-description" class="level2">
-<h2 class="anchored" data-anchor-id="environment-description">Environment description</h2>
-<p>Various attributes of the environment description are now directly accessed as fields, rather than through accessor methods:</p>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Old accessor</th>
-<th>New field access</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>altimetry(env)</code></td>
-<td><code>env.altimetry</code></td>
-</tr>
-<tr class="even">
-<td><code>bathymetry(env)</code></td>
-<td><code>env.bathymetry</code></td>
-</tr>
-<tr class="odd">
-<td><code>ssp(env)</code></td>
-<td><code>env.soundspeed</code></td>
-</tr>
-<tr class="even">
-<td><code>salinity(env)</code></td>
-<td><code>env.salinity</code></td>
-</tr>
-<tr class="odd">
-<td><code>waterdensity(env)</code></td>
-<td><code>env.density</code></td>
-</tr>
-<tr class="even">
-<td><code>seasurface(env)</code></td>
-<td><code>env.surface</code></td>
-</tr>
-<tr class="odd">
-<td><code>seabed(env)</code></td>
-<td><code>env.seabed</code></td>
-</tr>
-</tbody>
-</table>
-<p>The environment description supports <a href="./fields.html">fields</a> that can vary with spatial coordinates. This removes the need wrapping of constants with <code>ConstantDepth()</code>, <code>IsoSSP()</code>, etc. Instead, constant fields are just represented by the real numbers directly. Quantities varying with spatial coordinates are represented generically using a <code>SampledField</code> rather than specific types such as <code>SampledSSP</code>.</p>
-<p>The defaults for an <code>UnderwaterEnvironment</code> have also changed to become more generic. For example, the default seabed is now a <code>RigidBoundary</code> and the default sea surface is a <code>PressureReleaseBoundary</code>. Contrast this against the arbitrary default in <code>v0.3</code> of the default seabed being a <code>SandySilt</code>.</p>
-<p>Noise is no longer defined as part of the environmental description, and is defined as part of the new <a href="./api.html#channel-models-and-simulation">channel modeling</a> API.</p>
+<section id="geometry-queries" class="level2">
+<h2 class="anchored" data-anchor-id="geometry-queries">Geometry queries</h2>
+<p>Shapes support a set of geometric queries that propagation models (or users) may use:</p>
+<div id="14" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>shape <span class="op">=</span> <span class="fu">Ellipse</span>(<span class="fl">500.0</span>, <span class="op">-</span><span class="fl">40.0</span>, <span class="fl">20.0</span>, <span class="fl">8.0</span>; θ<span class="op">=</span><span class="fl">30</span>u<span class="st">"°"</span>)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">boundary_point</span>(shape, <span class="fl">0.25</span>)              <span class="co"># point on the boundary at parameter u ∈ [0,1]</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">normal</span>(shape, <span class="fl">0.25</span>)                      <span class="co"># unit outward normal at parameter u</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">curvature</span>(shape, <span class="fl">0.25</span>)                   <span class="co"># signed curvature at parameter u</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">distance</span>(shape, (x<span class="op">=</span><span class="fl">500</span>, z<span class="op">=-</span><span class="fl">70</span>))          <span class="co"># signed distance (negative inside)</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">is_inside</span>(shape, (x<span class="op">=</span><span class="fl">500</span>, z<span class="op">=-</span><span class="fl">40</span>))         <span class="co"># is a position inside the shape?</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">intersect_ray</span>(shape, (x<span class="op">=</span><span class="fl">0</span>, z<span class="op">=-</span><span class="fl">40</span>), (x<span class="op">=</span><span class="fl">1</span>, z<span class="op">=</span><span class="fl">0</span>))  <span class="co"># nearest ray-boundary intersection</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">bounding_box</span>(shape)                      <span class="co"># axis-aligned bounding box</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<div class="ansi-escaped-output">
+<pre><span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>(x = 496.0, y = 0.0, z = -33.07179676972449)
+<span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>(x = -0.4999999999999999, y = 0.0, z = 0.8660254037844387)
+<span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>0.02
+<span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>19.6921763136567
+<span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>true
+<span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>(t = 486.8480810155714, u = 0.34643056653874554, point = (x = 486.8480810155714, y = 0.0, z = -40.000000000000036), normal = (x = -0.7131225936548233, y = 0.0, z = 0.7010393472687663), curvature = 0.03222700885730057)
+<span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>(min = (x = 482.2236111653688, y = 0.0, z = -52.16552506059644), max = (x = 517.7763888346312, y = 0.0, z = -27.834474939403563))
+</pre>
+</div>
+</div>
+</div>
+<p><code>boundary_projection()</code> finds the boundary point nearest to a given position, and returns it together with the local normal, curvature and signed distance. <code>boundary_points()</code> samples the boundary, e.g.&nbsp;for plotting.</p>
+<p>All shape geometry is differentiable: gradients propagate through shape parameters and query positions with automatic differentiation (e.g.&nbsp;<code>ForwardDiff</code>), enabling optimization and inversion of scatterer location, size and orientation.</p>
 </section>
-<section id="propagation-modeling" class="level2">
-<h2 class="anchored" data-anchor-id="propagation-modeling">Propagation modeling</h2>
-<p>The <code>PekerisRayModel</code> is now renamed to <code>PekerisRayTracer</code>, and takes in maximum number of bounces as an optional argument, instead of number of rays. The <code>eigenrays</code> function is no longer supported, but its functionality is provided by <code>arrivals</code>. While <code>eigenrays</code> was specific to ray models, <code>arrivals</code> is more generic and may return modes, etc, depending on the propagation model. A few other functions have been renamed:</p>
-<table class="caption-top table">
-<thead>
-<tr class="header">
-<th>Old function</th>
-<th>New function</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>PekerisRayModel(env, nrays)</code></td>
-<td><code>PekerisRayTracer(env, maxbounces)</code></td>
-</tr>
-<tr class="even">
-<td><code>eigenrays</code></td>
-<td><code>arrivals</code></td>
-</tr>
-<tr class="odd">
-<td><code>transmissionloss</code></td>
-<td><code>transmission_loss</code></td>
-</tr>
-<tr class="even">
-<td><code>transfercoef</code></td>
-<td><code>acoustic_field</code></td>
-</tr>
-<tr class="odd">
-<td><code>impulseresponse</code></td>
-<td><code>impulse_response</code></td>
-</tr>
-</tbody>
-</table>
-<p>The plotting API no longer takes special keyword arguments such as <code>sources</code> and <code>receivers</code>. Instead, plot recipes are provided for each of the data types directly. So we can plot sources, receivers, arrivals, etc directly:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a>env <span class="op">=</span> <span class="fu">UnderwaterEnvironment</span>(bathymetry<span class="op">=</span><span class="fl">20</span>, seabed<span class="op">=</span>SandyClay)</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>pm <span class="op">=</span> <span class="fu">PekerisRayTracer</span>(env)</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>tx <span class="op">=</span> <span class="fu">AcousticSource</span>(<span class="fl">0.0</span>, <span class="op">-</span><span class="fl">5.0</span>, <span class="fl">1000.0</span>)</span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>rx <span class="op">=</span> <span class="fu">AcousticReceiver</span>(<span class="fl">100.0</span>, <span class="op">-</span><span class="fl">10.0</span>)</span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>rays <span class="op">=</span> <span class="fu">arrivals</span>(pm, tx, rx)</span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(env)</span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="fu">plot!</span>(tx)</span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="fu">plot!</span>(rx)</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="fu">plot!</span>(rays)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</section>
-<section id="acoustic-simulations" class="level2">
-<h2 class="anchored" data-anchor-id="acoustic-simulations">Acoustic simulations</h2>
-<p>The <code>record</code> and <code>recorder</code> functions used for acoustic simulations have been removed. Instead, a new <a href="./api.html#channel-models-and-simulation">channel modeling</a> API with a <code>transmit</code> function provides similar functionality, but is a lot more flexible.</p>
-<p>Example:</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>ch <span class="op">=</span> <span class="fu">channel</span>(pm, tx, rx, <span class="fl">192000</span>)</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>y <span class="op">=</span> <span class="fu">transmit</span>(ch, x)                 <span class="co"># for some signal x</span></span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p><br> The channel API also supports <a href="./replay.html">channel replay</a> and data-driven acoustic channels that are not derived from propagation models.</p>
-<p>Specific sources such as <code>Pinger</code> and <code>NarrowbandAcousticSource</code> have been removed. Other packages such as <code>SignalAnalysis</code> may be used to create a diverse set of sampled signals that can be transmitted through the acoustic channel using the <code>transmit</code> function.</p>
+<section id="custom-shapes" class="level2">
+<h2 class="anchored" data-anchor-id="custom-shapes">Custom shapes</h2>
+<p>Arbitrary 2-D shapes may be defined by a single parametric function tracing the closed boundary counter-clockwise in the x–z plane as <code>u</code> sweeps <code>[0, 1]</code>:</p>
+<div id="16" class="cell" data-execution_count="1">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode julia code-with-copy"><code class="sourceCode julia"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># a circle of radius 10 m centered at (500, -40)</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>circle <span class="op">=</span> <span class="fu">ParametricCurve</span>(u <span class="op">-&gt;</span> (<span class="fl">500</span> <span class="op">+</span> <span class="fl">10</span> <span class="op">*</span> <span class="fu">cospi</span>(<span class="fl">2</span>u), <span class="op">-</span><span class="fl">40</span> <span class="op">+</span> <span class="fl">10</span> <span class="op">*</span> <span class="fu">sinpi</span>(<span class="fl">2</span>u)))</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="pp">@info</span> <span class="fu">distance</span>(circle, (x<span class="op">=</span><span class="fl">500</span>, z<span class="op">=-</span><span class="fl">60</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output cell-output-stdout">
+<div class="ansi-escaped-output">
+<pre><span class="ansi-cyan-fg ansi-bold">[ </span><span class="ansi-cyan-fg ansi-bold">Info: </span>10.0
+</pre>
+</div>
+</div>
+</div>
+<p>Normals, curvatures and all derived queries are automatically computed from the parametric function using automatic differentiation. 3-D shapes may similarly be defined with <code>ParametricSurface</code>. See the <a href="./ext.html#scatterers-and-shapes">extending documentation</a> for details on the shape API, including how to define new shape types with analytic geometry.</p>
 
 
 </section>
