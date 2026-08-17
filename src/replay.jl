@@ -5,12 +5,15 @@ import Interpolations: interpolate, BSpline, Cubic, Line, OnGrid, scale, extrapo
 
 export BasebandReplayChannel
 
+# Phase fields and fc are Float64 regardless of T1: the drift correction
+# (φ/2πfc ~ 1e-5 s) and the carrier phasor over long signals both lose
+# precision in Float32. h stays ComplexF32 to keep large channels in memory.
 struct BasebandReplayChannel{T1,T2} <: AbstractChannelModel
   h::Array{Complex{T1},3}
-  θ::Matrix{Float64}        # was Matrix{T1}
-  φ::Matrix{Float64}        # was Matrix{T1}
+  θ::Matrix{Float64}        
+  φ::Matrix{Float64}       
   fs::T1
-  fc::Float64               # was T1
+  fc::Float64             
   step::Int
   f_resamp::T1
   noise::T2
@@ -27,14 +30,21 @@ function Base.show(io::IO, ch::BasebandReplayChannel)
 end
 
 """
+    BasebandReplayChannel(h, θ, φ, fs, fc, step=1, f_resamp=1.0; noise=nothing)
     BasebandReplayChannel(h, θ, fs, fc, step=1; noise=nothing)
     BasebandReplayChannel(h, fs, fc, step=1; noise=nothing)
 
 Construct a baseband replay channel with impulse responses `h` and optional
-phase estimates `θ` (theta_hat, phase-only) or delay-tracking estimates `φ` (phi_hat).
-`fs` is the sampling frequency in Sa/s, `fc` is the carrier frequency in Hz, and `step` is the
-decimation rate for the time axis of `h`. The effective sampling frequency of the impulse responses is
-`fs ÷ step` impulse responses per second.
+phase estimates `θ` (theta_hat, phase tracking only) or `φ` (phi_hat, delay
+tracking). `fs` is the sampling frequency in Sa/s, `fc` is the carrier frequency
+in Hz, and `step` is the decimation rate for the time axis of `h`. The effective
+sampling frequency of the impulse responses is `fs ÷ step` impulse responses per
+second. `f_resamp` is a time-invariant passband resampling factor.
+
+Channels are normally loaded from a UACR file (see below), which populates `θ`,
+`φ` and `f_resamp` from the file. The constructors above are mainly useful for
+synthetic channels: pass an empty `Matrix{Float64}(undef, 0, 0)` for whichever
+of `θ` or `φ` is not used. If both are given, `φ` takes precedence.
 
 An additive noise model may be optionally specified as `noise`. If specified,
 it is used to corrupt the received signals.
@@ -77,6 +87,8 @@ function BasebandReplayChannel(filename::AbstractString; upsample=false, rxs=:, 
     data = matread(filename)
     all(["version", "h_hat", "params"] .∈ Ref(keys(data))) || error("Bad channel file format")
     data["version"] == 1.0 || @warn "Unsupported channel file version"
+    # the file stores h_hat in forward-delay order; the convolution consumes
+    # taps in reverse (see _apply_tvir!), so flip the delay axis on load.
     h = reverse(data["h_hat"]; dims=1)
     M = size(h, 2)
     rxs === (:) && (rxs = 1:M)
@@ -120,7 +132,7 @@ function BasebandReplayChannel(filename::AbstractString; upsample=false, rxs=:, 
 end
 
 """
-    transmit(ch::BasebandReplayChannel, x; rxs=:, abstime=false, noisy=true, fs=nothing, start=nothing)
+    transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noisy=true, fs=nothing, start=nothing)
 
 Simulate the transmission of passband signal `x` through the channel model `ch`.
 If `txs` is specified, it specifies the indices of the sources active in the
@@ -131,9 +143,8 @@ specified (or all) receivers.
 
 `fs` specifies the sampling rate of the input signal. The output signal is
 sampled at the same rate. If `fs` is not specified but `x` is a `SampledSignal`,
-the sampling rate of `x` is used. Otherwise, the signal is assumed to be
-sampled at the channel's sampling rate. If the channel specifies a passband
-resampling factor (`f_resamp`), the output is resampled by that factor to
+the sampling rate of `x` is used; otherwise an error is raised. If the channel
+specifies a passband resampling factor (`f_resamp`), the output is resampled by that factor to
 reproduce the nominal Doppler offset.
 
 If `abstime` is `true`, the returned signals begin at the start of transmission.
@@ -169,7 +180,7 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
   # apply the channel
   ȳ = similar(x̄, nframes(x̄) + L - 1, length(rxs))
   h = @view ch.h[:,rxs,start:start+Treq]
-  _apply_tvir!(ȳ, x̄, ch.step == 1 ? h : resample(h, ch.step; dims=3))
+  _apply_tvir!(ȳ, x̄, ch.step == 1 ? h : _interp_ir(h, ch.step, nframes(ȳ)))
   if size(ch.φ, 2) > 0
     # phi_hat: apply phase then re-interpolate at time-shifted grid to insert delay drift
     i = (start - 1) * ch.step + 1
@@ -178,7 +189,7 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
     t = range(0.0, step=1.0/ch.fs, length=nframes(ȳ))
     for (j, _) ∈ enumerate(rxs)
       drift = Float64.(φ_seg[:, j] ./(2π * ch.fc))
-      itp = extrapolate(scale(interpolate(@view(ȳ[:, j]), BSpline(Cubic(Line(OnGrid())))), t), Line())
+      itp = extrapolate(scale(interpolate(@view(ȳ[:, j]), BSpline(Cubic(Line(OnGrid())))), t), 0.0)
       ȳ[:, j] .= itp.(t .+ drift)
     end
   elseif size(ch.θ, 2) > 0
@@ -191,10 +202,7 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
   y .*= cispi.(2 * ch.fc * (0:nframes(y)-1) ./ fs)
   # resample in passband to reproduce the nominal Doppler offset, if needed
   isone(ch.f_resamp) || (y = resample(y, Float64(ch.f_resamp); dims=1))
-  input_was_analytic || (y = real(y))
-  # normalize total mean power across receivers to the number of receivers
-  p = sum(abs2, y)
-  iszero(p) || (y .*= sqrt(length(rxs) * size(y,1) / p))
+  input_was_analytic || (y = real(y) .* √2) # SignalAnalysis.analytic() is energy-preserving (divides by √2)
   y = signal(y, fs)
   # add noise
   if noisy && ch.noise !== nothing
@@ -216,4 +224,20 @@ function _apply_tvir!(y, x, h)
     y[i,:] .= @views transpose(h[:,:,i]) * x[i-L+1:i]
   end
   y
+end
+
+# Interpolate the impulse response along its time axis from the snapshot rate
+# (fs_delay/step) up to the delay rate, using a cubic spline with zero fill
+# outside the sampled range.
+function _interp_ir(h, step, n)
+  L, M, T = size(h)
+  out = similar(h, L, M, n)
+  ts = range(0.0, step=float(step), length=T)     # snapshot times, in delay samples
+  for m ∈ 1:M, l ∈ 1:L
+    itp = extrapolate(scale(interpolate(@view(h[l, m, :]), BSpline(Cubic(Line(OnGrid())))), ts), 0.0)
+    for i ∈ 1:n
+      out[l, m, i] = itp(float(i - 1))
+    end
+  end
+  out
 end
