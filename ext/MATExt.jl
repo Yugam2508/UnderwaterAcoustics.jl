@@ -9,7 +9,7 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
   # TODO: support UACR noise models
   data = matread(filename)
   all(["version", "h_hat", "params"] .∈ Ref(keys(data))) || error("Bad channel file format")
-  data["version"] == 1.0 || @warn "Unsupported channel file version"
+  data["version"] >= 1.0 || @warn "Unsupported channel file version"
   # the file stores h_hat in forward-delay order; the convolution consumes
   # taps in reverse (see _apply_tvir!), so flip the delay axis on load.
   h = reverse(data["h_hat"]; dims=1)
@@ -32,11 +32,12 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
   fs_time = data["params"]["fs_time"]
   fc = data["params"]["fc"]
   f_resamp = haskey(data, "f_resamp") ? Float64(only(data["f_resamp"])) : 1.0
-  if upsample && fs != fs_time
+  ratio = fs / fs_time
+  step = round(Int, ratio)
+  isapprox(ratio, step; rtol=1e-9) || error("fs_delay/fs_time must be an integer ratio (got $ratio)")
+  if upsample && step != 1
+    h = UnderwaterAcoustics._interp_ir(h, step, (size(h, 3) - 1) * step + 1)
     step = 1
-    h = resample(h, fs / fs_time; dims=3)
-  else
-    step = round(Int, fs / fs_time)
   end
   # spec: size(phase, 2)/fs_delay == size(h_hat, 3)/fs_time  (phase spans the IR duration)
   let nphase = size(φ, 1) > 0 ? size(φ, 1) : size(θ, 1)
