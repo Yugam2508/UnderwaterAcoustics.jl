@@ -9,10 +9,10 @@ export BasebandReplayChannel
 # precision in Float32. h stays ComplexF32 to keep large channels in memory.
 struct BasebandReplayChannel{T1,T2} <: AbstractChannelModel
   h::Array{Complex{T1},3}
-  θ::Matrix{Float64}        
-  φ::Matrix{Float64}       
+  θ::Matrix{Float64}
+  φ::Matrix{Float64}
   fs::T1
-  fc::Float64             
+  fc::Float64
   step::Int
   doppler::Float64
   noise::T2

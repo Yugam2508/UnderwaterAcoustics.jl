@@ -52,4 +52,4 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
   BasebandReplayChannel(h, θ, φ, fs, fc, step, doppler; noise)
 end
 
-end # module
+end
