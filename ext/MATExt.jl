@@ -31,7 +31,7 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
   fs = data["params"]["fs_delay"]
   fs_time = data["params"]["fs_time"]
   fc = data["params"]["fc"]
-  f_resamp = haskey(data, "f_resamp") ? Float64(only(data["f_resamp"])) : 1.0
+  doppler = haskey(data, "f_resamp") ? Float64(only(data["f_resamp"])) : 1.0
   ratio = fs / fs_time
   step = round(Int, ratio)
   isapprox(ratio, step; rtol=1e-9) || error("fs_delay/fs_time must be an integer ratio (got $ratio)")
@@ -49,7 +49,7 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
               "h_hat spans $(round(dur_h;digits=3))s (spec requires equal durations)")
     end
   end
-  BasebandReplayChannel(h, θ, φ, fs, fc, step, f_resamp; noise)
+  BasebandReplayChannel(h, θ, φ, fs, fc, step, doppler; noise)
 end
 
 end # module
