@@ -14,13 +14,13 @@ struct BasebandReplayChannel{T1,T2} <: AbstractChannelModel
   fs::T1
   fc::Float64             
   step::Int
-  f_resamp::T1
+  f_resamp::Float64
   noise::T2
-  function BasebandReplayChannel(h, θ, φ, fs, fc, step::Int=1, f_resamp=1.0; noise=nothing)
+  function BasebandReplayChannel(h, θ::AbstractMatrix, φ::AbstractMatrix, fs::Real, fc::Real, step::Int=1, f_resamp::Real=1.0; noise=nothing)
     h = ComplexF32.(h)
     θ = Float64.(θ)
     φ = Float64.(φ)
-    new{Float32,typeof(noise)}(h, θ, φ, Float32(fs), Float64(fc), step, Float32(f_resamp), noise)
+    new{Float64,typeof(noise)}(h, θ, φ, Float32(fs), Float64(fc), step, Float64(f_resamp), noise)
   end
 end
 
@@ -48,14 +48,14 @@ of `θ` or `φ` is not used. If both are given, `φ` takes precedence.
 An additive noise model may be optionally specified as `noise`. If specified,
 it is used to corrupt the received signals.
 """
-function BasebandReplayChannel(h, θ, fs, fc, step::Int=1; noise=nothing)
+function BasebandReplayChannel(h, θ::AbstractMatrix, fs::Real, fc::Real, step::Int=1; noise=nothing)
   fs = in_units(u"Hz", fs)
   fc = in_units(u"Hz", fc)
   φ = Matrix{Float64}(undef, 0, 0)
   BasebandReplayChannel(h, θ, φ, fs, fc, step; noise)
 end
 
-function BasebandReplayChannel(h, fs, fc, step::Int=1; noise=nothing)
+function BasebandReplayChannel(h, fs::Real, fc::Real, step::Int=1; noise=nothing)
   fs = in_units(u"Hz", fs)
   fc = in_units(u"Hz", fc)
   θ = Matrix{Float64}(undef, 0, 0)
@@ -87,9 +87,6 @@ function BasebandReplayChannel(filename::AbstractString; upsample=false, rxs=:, 
     error("Loading .mat replay channels requires the MAT package; run `using MAT` first")
   _load_mat_replay_channel(filename, upsample, rxs, noise)
 end
-
-# implemented in MATExt
-function _load_mat_replay_channel end
 
 # implemented in MATExt
 function _load_mat_replay_channel end
