@@ -270,3 +270,32 @@ end
     end
   end
 end
+
+@testitem "replay bounds checking" setup=[ReplaySetup] begin
+  # the usable signal length is shorter than the raw channel duration by
+  # roughly the impulse response length, and an explicitly supplied start
+  # must lie within the range the channel can accommodate
+  h = make_h(TAPS)
+  ch = BasebandReplayChannel(h, FS_DELAY, FC, STEP)
+
+  # a signal short enough to replay, for the start-index cases
+  x = signal(make_probe(), FS_IN)
+
+  # T - Treq is the largest valid start for this signal
+  Treq = ceil(Int, (round(Int, nframes(x) * FS_DELAY / FS_IN) + L - 1) / STEP) + 1
+  maxstart = T - Treq
+  @test maxstart ≥ 1                                    # sanity: probe fits
+
+  # start below range
+  @test_throws ErrorException transmit(ch, x; start=0, noisy=false)
+  # start above range
+  @test_throws ErrorException transmit(ch, x; start=maxstart+1, noisy=false)
+  # a valid start still works
+  @test size(collect(transmit(ch, x; start=maxstart, noisy=false)), 2) == M
+
+  # a signal too long to replay: fills the whole channel duration, which the
+  # old duration-only check allowed but the convolution cannot accommodate
+  nlong = round(Int, T * STEP * FS_IN / FS_DELAY)
+  xlong = signal(zeros(nlong), FS_IN)
+  @test_throws ErrorException transmit(ch, xlong; noisy=false)
+end

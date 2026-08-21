@@ -131,12 +131,13 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
   fs < 2 * ch.fc && error("Signal sampling rate ($fs Hz) is too low for carrier frequency ($(ch.fc) Hz)")
   input_was_analytic = isanalytic(x)
   x = analytic(signal(samples(x), fs))
-  duration(x) ≤ maxtime || error("Signal duration ($(round(duration(x); digits=1)) s) exceeds replay channel duration ($(round(maxtime; digits=1)) s)")
   # convert to baseband and downsample
   x̄ = samples(resample(x .* cispi.(-2 * ch.fc * (0:nframes(x)-1) ./ fs), ch.fs/fs))
   # choose a random start time if not specified
   Treq = ceil(Int, (nframes(x̄) + L - 1) / ch.step) + 1
+  Treq < T || error("Signal duration ($(round(duration(x); digits=3)) s) exceeds maximum replayable duration ($(round(maxtime; digits=3)) s)")
   start = something(start, rand(1:T-Treq))
+  1 ≤ start ≤ T - Treq || error("Invalid start index ($start ∉ 1:$(T-Treq))")
   # apply the channel
   ȳ = similar(x̄, nframes(x̄) + L - 1, length(rxs))
   h = @view ch.h[:,rxs,start:start+Treq]
