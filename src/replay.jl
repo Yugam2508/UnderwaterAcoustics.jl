@@ -140,8 +140,11 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
   1 ≤ start ≤ T - Treq || error("Invalid start index ($start ∉ 1:$(T-Treq))")
   # apply the channel
   ȳ = similar(x̄, nframes(x̄) + L - 1, length(rxs))
-  h = @view ch.h[:,rxs,start:start+Treq]
-  _apply_tvir!(ȳ, x̄, ch.step == 1 ? h : _interp_ir(h, ch.step, nframes(ȳ)))
+  pad = 2
+  lo = max(1, start - pad)
+  hi = min(T, start + Treq + pad)
+  h = @view ch.h[:,rxs,lo:hi]
+  _apply_tvir!(ȳ, x̄, ch.step == 1 ? h : _interp_ir(h, ch.step, nframes(ȳ), (start - lo) * ch.step))
   if size(ch.φ, 2) > 0
     # phi_hat: apply phase then re-interpolate at time-shifted grid to insert delay drift
     i = (start - 1) * ch.step + 1
@@ -190,14 +193,14 @@ end
 # Interpolate the impulse response along its time axis from the snapshot rate
 # (fs_delay/step) up to the delay rate, using a cubic spline with zero fill
 # outside the sampled range.
-function _interp_ir(h, step, n)
+function _interp_ir(h, step, n, offset=0)
   L, M, T = size(h)
   out = similar(h, L, M, n)
   ts = range(0.0, step=float(step), length=T)     # snapshot times, in delay samples
   for m ∈ 1:M, l ∈ 1:L
     itp = extrapolate(scale(interpolate(@view(h[l, m, :]), BSpline(Cubic(Line(OnGrid())))), ts), 0.0)
     for i ∈ 1:n
-      out[l, m, i] = itp(float(i - 1))
+      out[l, m, i] = itp(float(i - 1 + offset))
     end
   end
   out
