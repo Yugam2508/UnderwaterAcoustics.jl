@@ -1,108 +1,143 @@
 """
-Generate UACR-format reference channels and Python reference outputs, used as
-committed fixtures by test/test_replay.jl (so the suite never calls Python).
+Generate reference outputs for test/test_replay.jl from the Python
+implementation of UACR channel replay.
 
-Reference: uwa-channels/python `replay.py` (post-2026-07-07: no output
-normalisation, 2*real() upconversion, spline interpolation with zero fill).
-Place that file alongside this script as `replay_ref.py`.
+The channel is deterministic and closed-form, so the Julia test rebuilds the
+same `h_hat`/`phi_hat`/`theta_hat` bit-for-bit and writes its own .mat to a
+temporary directory. Only the reference *output* is committed, as plain text
+(y_<mode>.txt), so there are no binary fixtures in the repo.
 
-Run from the repo root:  python test/data/gen_references.py
+Run from the repository root:
 
-IMPORTANT - parameter constraint:
-  The reference downconverts a REAL input, so its baseband retains an image at
-  -2*fc. That image is only removed by the resample to fs_delay if
-      2*fc > fs_delay/2.
-  Configurations violating this leave the image in place and the output comes
-  out 2x too large. The parameters below satisfy it (fc=12k, fs_delay=24k).
-  The probe is passed as a REAL signal (the reference's 2*real() upconversion
-  already compensates for the halving, matching Julia's analytic front end).
+    python test/data/gen_references.py
 
-Needs: numpy, scipy, h5py, hdf5storage.
+The script downloads the reference implementation at a pinned commit, so the
+outputs are reproducible. Requires numpy, scipy, h5py and hdf5storage.
 """
+
 import os
+import urllib.request
+import importlib.util
+
 import numpy as np
 import h5py
 import hdf5storage
-import importlib.util
 
-_spec = importlib.util.spec_from_file_location(
-    "replay_ref", os.path.join(os.path.dirname(__file__), "replay_ref.py"))
-ref = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(ref)
+# pinned so regenerating gives the same reference outputs
+REF_REPO = "uwa-channels/python"
+REF_COMMIT = "cdb29f8098566db2d44a0d499a9319800d4c1bbe"
+REF_PATH = "src/uwa_channels/replay.py"
+REF_URL = f"https://raw.githubusercontent.com/{REF_REPO}/{REF_COMMIT}/{REF_PATH}"
 
-OUTDIR = os.path.dirname(__file__)
+HERE = os.path.dirname(os.path.abspath(__file__))
 
-# must mirror the constants in test_replay.jl
+# must match the constants in test_replay.jl
 FS_IN, FC, FS_DELAY = 96_000.0, 12_000.0, 24_000.0
-SEED = 20260812
+
+# (name, step, snapshots, mode, Doppler scale in Hz)
+#   the step=1 cases keep the Doppler low so the channel is physically
+#   plausible; the tv case uses a much larger Doppler so that the impulse
+#   response varies appreciably over the probe and exercises the interpolation
+#   of h along the time axis
+CASES = [
+    ("none",  1, 240, None,        3.0),
+    ("theta", 1, 240, "theta_hat", 3.0),
+    ("phi",   1, 240, "phi_hat",   3.0),
+    ("tv",   20, 120, "phi_hat",  80.0),
+]
 
 
-def chirp(fs, D=0.008, f0=9_000.0, f1=15_000.0, tau=0.002):
-    n = np.arange(int(round(D * fs))); t = n / fs
-    k = (f1 - f0) / D
-    x = np.cos(2 * np.pi * (f0 * t + 0.5 * k * t * t))
+def load_reference():
+    """Download the pinned reference implementation and import it."""
+    path = os.path.join(HERE, "_replay_ref.py")
+    if not os.path.exists(path):
+        print(f"downloading reference from {REF_URL}")
+        urllib.request.urlretrieve(REF_URL, path)
+    spec = importlib.util.spec_from_file_location("_replay_ref", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def make_h(L, M, T, step, fd_scale):
+    """Closed-form time-varying impulse response, [delay, rx, time]."""
+    i = np.arange(L)[:, None, None]
+    j = np.arange(M)[None, :, None]
+    k = np.arange(T)[None, None, :]
+    g = 0.6**i * np.exp(1j * np.pi * (i + 3 * j) / 7)   # decaying taps
+    fd = fd_scale * np.sin(1.7 * i + 0.9 * j)           # Doppler per tap
+    return g * np.exp(2j * np.pi * fd * k * step / FS_DELAY)
+
+
+def make_phase(M, nphase):
+    """Closed-form phase vector, [rx, time], sampled at FS_DELAY."""
+    q = np.arange(nphase)[None, :]
+    m = np.arange(M)[:, None]
+    return 0.4 * np.sin(2 * np.pi * 1.3 * q / FS_DELAY + 0.7 * m) + 1.5 * q / FS_DELAY
+
+
+def make_probe(fs, D=0.008, f0=9_000.0, f1=15_000.0, tau=0.002):
+    """Real passband chirp, band-limited around FC."""
+    n = np.arange(int(round(D * fs)))
+    t = n / fs
+    x = np.cos(2 * np.pi * (f0 * t + 0.5 * (f1 - f0) / D * t * t))
     w = np.ones_like(t)
     w[t < tau] = 0.5 * (1 - np.cos(np.pi * t[t < tau] / tau))
     w[t > D - tau] = 0.5 * (1 - np.cos(np.pi * (D - t[t > D - tau]) / tau))
     return x * w
 
 
-def build(mode, L=16, M=2, T=480, step=1, time_varying=False):
-    """UACR channel dict in MATLAB layout: h_hat is [delay, rx, time]."""
-    rng = np.random.default_rng(SEED)
-    fs_time = FS_DELAY / step
-    h = (rng.standard_normal((L, M, T)) + 1j * rng.standard_normal((L, M, T))) * 0.15
-    if time_varying:                      # smooth drift across snapshots
-        h *= (1 + 0.3 * np.cos(2 * np.pi * np.arange(T) / T))[None, None, :]
-    mat = {
-        "version": np.array([[1.0]]),
-        "h_hat": h.astype(np.complex128),
-        "params": {"fs_delay": np.array([[FS_DELAY]]),
-                   "fs_time": np.array([[fs_time]]),
-                   "fc": np.array([[FC]])},
-    }
-    nphase = T * step                     # spec: phase spans the IR duration
-    if mode == "phi":
-        mat["phi_hat"] = np.cumsum(rng.standard_normal((M, nphase)) * 0.01, axis=1)
-    elif mode == "theta":
-        mat["theta_hat"] = np.cumsum(rng.standard_normal((M, nphase)) * 0.01, axis=1)
-    return mat
-
-
 def py_channel(path):
-    """Read back the written fixture the way the Python reference expects."""
+    """Read the .mat back the way the reference implementation expects."""
     with h5py.File(path, "r") as f:
-        hh = f["h_hat"][:]                                  # [time, rx, delay]
-        ch = {"version": f["version"][()],
-              "h_hat": {"real": np.array(hh["real"]), "imag": np.array(hh["imag"])},
-              "params": {k: f["params"][k][()] for k in f["params"]}}
-        for k in ("phi_hat", "theta_hat"):
-            if k in f:
-                ch[k] = f[k][:]                             # [time, rx]
+        hh = f["h_hat"][:]                       # [time, rx, delay]
+        ch = {
+            "version": f["version"][()],
+            "h_hat": {"real": np.array(hh["real"]), "imag": np.array(hh["imag"])},
+            "params": {k: f["params"][k][()] for k in f["params"]},
+        }
+        for key in ("phi_hat", "theta_hat"):
+            if key in f:
+                ch[key] = f[key][:]              # [time, rx]
     return ch
 
 
-CASES = [("none",  dict(step=1,  T=240, time_varying=False)),
-         ("theta", dict(step=1,  T=240, time_varying=False)),
-         ("phi",   dict(step=1,  T=240, time_varying=False)),
-         ("tv",    dict(step=20, T=120, time_varying=True))]
+def main():
+    ref = load_reference()
+    probe = make_probe(FS_IN)
+    L, M = 16, 2
 
-for name, kw in CASES:
-    mode = "phi" if name == "tv" else name
-    mat = build(mode, **kw)
-    tmp = os.path.join(OUTDIR, f"_tmp_{name}.mat")
-    final = os.path.join(OUTDIR, f"replay_ref_{name}.mat")
-    for p in (tmp, final):
-        if os.path.exists(p):
-            os.remove(p)
+    for name, step, T, mode, fd_scale in CASES:
+        fs_time = FS_DELAY / step
+        mat = {
+            "version": np.array([[1.0]]),
+            "h_hat": make_h(L, M, T, step, fd_scale).astype(np.complex128),
+            "params": {
+                "fs_delay": np.array([[FS_DELAY]]),
+                "fs_time": np.array([[fs_time]]),
+                "fc": np.array([[FC]]),
+            },
+        }
+        if mode is not None:
+            mat[mode] = make_phase(M, T * step)
 
-    hdf5storage.savemat(tmp, mat, format="7.3", matlab_compatible=True)
-    probe = chirp(FS_IN)                       # REAL probe (see note above)
-    y_ref = ref.replay(probe, FS_IN, np.arange(mat["h_hat"].shape[1]),
-                       py_channel(tmp), start=0)
-    os.remove(tmp)
+        tmp = os.path.join(HERE, f"_tmp_{name}.mat")
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        hdf5storage.savemat(tmp, mat, format="7.3", matlab_compatible=True)
+        y = np.asarray(ref.replay(probe, FS_IN, np.arange(M), py_channel(tmp), start=0),
+                       dtype=np.float64)
+        os.remove(tmp)
 
-    mat["probe"] = probe.astype(np.float64)
-    mat["y_ref"] = np.asarray(y_ref, dtype=np.float64)
-    hdf5storage.savemat(final, mat, format="7.3", matlab_compatible=True)
-    print(f"{name:6s} step={kw['step']:2d}  y_ref{y_ref.shape}  "
-          f"peak={np.abs(y_ref).max():.4f}  finite={np.isfinite(y_ref).all()}")
+        out = os.path.join(HERE, f"y_{name}.txt")
+        np.savetxt(out, y, fmt="%.17g",
+                   header=f"reference replay output: mode={mode or 'none'}, "
+                          f"step={step}, L={L}, M={M}, T={T}, fd={fd_scale} Hz\n"
+                          f"generated by gen_references.py from {REF_REPO}@{REF_COMMIT[:12]}\n"
+                          f"columns are receivers, rows are samples at fs={FS_IN:.0f} Sa/s")
+        print(f"{name:6s} step={step:2d} fd={fd_scale:5.1f} Hz -> {y.shape} "
+              f"peak={np.abs(y).max():.4f} -> {os.path.basename(out)}")
+
+
+if __name__ == "__main__":
+    main()

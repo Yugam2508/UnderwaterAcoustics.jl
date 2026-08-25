@@ -225,48 +225,89 @@ end
 end
 
 @testitem "replay vs python reference" setup=[ReplaySetup] begin
-  # Cross-check the full replayed signal against stored reference outputs from
-  # the Python implementation (github.com/uwa-channels/python). Regenerate with
-  # test/data/gen_references.py, which runs the vendored copy of the upstream
-  # reference in test/data/replay_ref.py. The fixtures are UACR .mat files read
-  # through the real loader, so this also covers the file-format reader for each
-  # tracking mode: none, theta_hat, phi_hat, and a step=20 time-varying case.
-  #
-  # Agreement is measured by scale-tolerant cross-correlation plus an explicit
-  # amplitude check, since correlation alone cannot see a scale error. The
-  # residual is the accumulated numerical difference between two independent
-  # implementations of the same algorithm (rate conversion and cubic spline
-  # interpolation are done with different libraries on each side). Measured
-  # 1-corr: ~1.3e-3 for the step=1 cases, ~1e-4 for the time-varying case.
-  using MAT: matread
-  datadir = joinpath(@__DIR__, "data")
+  # Cross-check the full replayed signal against reference outputs from the
+  # Python implementation (github.com/uwa-channels/python). The channel is
+  # deterministic and closed-form, so it is rebuilt here bit-for-bit and written
+  # to a temporary .mat; only the reference output is committed, as plain text.
+  # Regenerate with test/data/gen_references.py, which downloads the reference
+  # implementation at a pinned commit.
+  using MAT: matwrite
 
-  # best normalised cross-correlation over small lags (tolerates a sample or
-  # two of length/offset difference between the implementations)
-  function refcorr(a, b)
-    na, nb = length(a), length(b); best = -1.0
-    for lag in -8:8
-      i1 = max(1, 1 + lag); i2 = min(na, nb + lag)
-      i2 > i1 || continue
-      aa = @view a[i1:i2]; bb = @view b[(i1 - lag):(i2 - lag)]
-      c = abs(sum(aa .* bb)) / (sqrt(sum(abs2, aa)) * sqrt(sum(abs2, bb)))
-      c > best && (best = c)
+  datadir = joinpath(@__DIR__, "data")
+  NL, NM = 16, 2
+
+  # closed-form impulse response, [delay, rx, time]; must match gen_references.py
+  function ref_h(nl, nm, nt, step, fd_scale)
+    h = zeros(ComplexF64, nl, nm, nt)
+    for i ∈ 0:nl-1, j ∈ 0:nm-1, k ∈ 0:nt-1
+      g = 0.6^i * cis(π * (i + 3j) / 7)
+      fd = fd_scale * sin(1.7i + 0.9j)
+      h[i+1, j+1, k+1] = g * cis(2π * fd * k * step / FS_DELAY)
     end
-    best
+    h
   end
 
-  for (mode, tol) in [("none", 0.995), ("theta", 0.995),
-                      ("phi", 0.995), ("tv", 0.999)]
-    path = joinpath(datadir, "replay_ref_$(mode).mat")
-    data = matread(path)
-    ch = BasebandReplayChannel(path)
-    # the stored probe is sampled at FS_IN, not at the channel's delay rate
-    y = collect(transmit(ch, signal(vec(data["probe"]), FS_IN); start=1, noisy=false))
-    y_ref = data["y_ref"]
+  # closed-form phase vector, [rx, time] at FS_DELAY; must match gen_references.py
+  function ref_phase(nm, nphase)
+    p = zeros(Float64, nm, nphase)
+    for m ∈ 0:nm-1, q ∈ 0:nphase-1
+      p[m+1, q+1] = 0.4 * sin(2π * 1.3q / FS_DELAY + 0.7m) + 1.5q / FS_DELAY
+    end
+    p
+  end
+
+  # the probe used to generate the references
+  function ref_probe(fs; D=0.008, f0=9000.0, f1=15000.0, tau=0.002)
+    n = 0:round(Int, D * fs)-1
+    t = n ./ fs
+    x = cos.(2π .* (f0 .* t .+ 0.5 * (f1 - f0) / D .* t .^ 2))
+    w = ones(length(t))
+    for (idx, tt) ∈ enumerate(t)
+      tt < tau && (w[idx] = 0.5 * (1 - cos(π * tt / tau)))
+      tt > D - tau && (w[idx] = 0.5 * (1 - cos(π * (D - tt) / tau)))
+    end
+    x .* w
+  end
+
+  # read a reference output (whitespace-separated, '#' comment lines)
+  function read_ref(path)
+    rows = Vector{Vector{Float64}}()
+    for line ∈ eachline(path)
+      s = strip(line)
+      (isempty(s) || startswith(s, "#")) && continue
+      push!(rows, parse.(Float64, split(s)))
+    end
+    reduce(vcat, transpose.(rows))
+  end
+
+  probe = ref_probe(FS_IN)
+
+  #  name    step   T   mode         Doppler (Hz)
+  cases = [("none",   1, 240, nothing,     3.0),
+           ("theta",  1, 240, "theta_hat", 3.0),
+           ("phi",    1, 240, "phi_hat",   3.0),
+           ("tv",    20, 120, "phi_hat",  80.0)]
+
+  for (name, step, nt, mode, fd) ∈ cases
+    data = Dict{String,Any}(
+      "version" => 1.0,
+      "h_hat" => ref_h(NL, NM, nt, step, fd),
+      "params" => Dict("fs_delay" => FS_DELAY, "fs_time" => FS_DELAY / step, "fc" => FC))
+    mode === nothing || (data[mode] = ref_phase(NM, nt * step))
+
+    tmp = joinpath(tempdir(), "uacr_ref_$(name).mat")
+    matwrite(tmp, data)
+    ch = BasebandReplayChannel(tmp)
+    y = collect(transmit(ch, signal(probe, FS_IN); start=1, noisy=false))
+    rm(tmp; force=true)
+
+    y_ref = read_ref(joinpath(datadir, "y_$(name).txt"))
     @test size(y, 2) == size(y_ref, 2)
-    for m in 1:size(y_ref, 2)
-      @test refcorr(y[:, m], y_ref[:, m]) > tol
-      @test sqrt(sum(abs2, y[:, m])) / sqrt(sum(abs2, y_ref[:, m])) ≈ 1 atol=0.03
+    n = min(size(y, 1), size(y_ref, 1))
+    for m ∈ 1:size(y_ref, 2)
+      a, b = y[1:n, m], y_ref[1:n, m]
+      @test maximum(abs.(a .- b)) / maximum(abs.(b)) < 3e-3
+      @test sqrt(sum(abs2, a)) / sqrt(sum(abs2, b)) ≈ 1 atol=0.005
     end
   end
 end
