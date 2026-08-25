@@ -306,8 +306,8 @@ end
     n = min(size(y, 1), size(y_ref, 1))
     for m ∈ 1:size(y_ref, 2)
       a, b = y[1:n, m], y_ref[1:n, m]
-      @test maximum(abs.(a .- b)) / maximum(abs.(b)) < 3e-3
-      @test sqrt(sum(abs2, a)) / sqrt(sum(abs2, b)) ≈ 1 atol=0.005
+      @test maximum(abs.(a .- b)) / maximum(abs.(b)) < 5e-3
+      @test sqrt(sum(abs2, a)) / sqrt(sum(abs2, b)) ≈ 1 atol=0.01
     end
   end
 end

@@ -32,3 +32,5 @@ qdocs/.gitignore
 qdocs/_freeze
 UnderwaterAcoustics.code-workspace
 tmp
+test/data/_replay_ref.py
+test/data/__pycache__/
