@@ -138,7 +138,7 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
   1 ≤ start ≤ T - Treq || error("Invalid start index ($start ∉ 1:$(T-Treq))")
   # apply the channel
   ȳ = similar(x̄, nframes(x̄) + L - 1, length(rxs))
-  pad = 2
+  pad = ch.step == 1 ? 0 : 2
   lo = max(1, start - pad)
   hi = min(T, start + Treq + pad)
   h = @view ch.h[:,rxs,lo:hi]

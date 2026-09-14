@@ -30,6 +30,7 @@ REF_PATH = "src/uwa_channels/replay.py"
 REF_URL = f"https://raw.githubusercontent.com/{REF_REPO}/{REF_COMMIT}/{REF_PATH}"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+TMP = os.path.normpath(os.path.join(HERE, "..", "..", "tmp"))
 
 # must match the constants in test_replay.jl
 FS_IN, FC, FS_DELAY = 96_000.0, 12_000.0, 24_000.0
@@ -49,7 +50,8 @@ CASES = [
 
 def load_reference():
     """Download the pinned reference implementation and import it."""
-    path = os.path.join(HERE, "_replay_ref.py")
+    os.makedirs(TMP, exist_ok=True)
+    path = os.path.join(TMP, "_replay_ref.py")
     if not os.path.exists(path):
         print(f"downloading reference from {REF_URL}")
         urllib.request.urlretrieve(REF_URL, path)
@@ -121,7 +123,7 @@ def main():
         if mode is not None:
             mat[mode] = make_phase(M, T * step)
 
-        tmp = os.path.join(HERE, f"_tmp_{name}.mat")
+        tmp = os.path.join(TMP, f"_tmp_{name}.mat")
         if os.path.exists(tmp):
             os.remove(tmp)
         hdf5storage.savemat(tmp, mat, format="7.3", matlab_compatible=True)
