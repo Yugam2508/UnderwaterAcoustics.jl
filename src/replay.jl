@@ -16,7 +16,9 @@ struct BasebandReplayChannel{T1,T2} <: AbstractChannelModel
   step::Int
   doppler::Float64
   noise::T2
-  function BasebandReplayChannel(h, θ::AbstractMatrix, φ::AbstractMatrix, fs::Real, fc::Real, step::Int=1, doppler::Real=1.0; noise=nothing)
+  function BasebandReplayChannel(h, θ::AbstractMatrix, φ::AbstractMatrix, fs::Number, fc::Number, step::Int=1, doppler::Real=1.0; noise=nothing)
+    fs = in_units(u"Hz", fs)
+    fc = in_units(u"Hz", fc)
     h = ComplexF32.(h)
     θ = Float64.(θ)
     φ = Float64.(φ)
@@ -48,16 +50,12 @@ of `θ` or `φ` is not used. If both are given, `φ` takes precedence.
 An additive noise model may be optionally specified as `noise`. If specified,
 it is used to corrupt the received signals.
 """
-function BasebandReplayChannel(h, θ::AbstractMatrix, fs::Real, fc::Real, step::Int=1; noise=nothing)
-  fs = in_units(u"Hz", fs)
-  fc = in_units(u"Hz", fc)
+function BasebandReplayChannel(h, θ::AbstractMatrix, fs::Number, fc::Number, step::Int=1; noise=nothing)
   φ = Matrix{Float64}(undef, 0, 0)
   BasebandReplayChannel(h, θ, φ, fs, fc, step; noise)
 end
 
-function BasebandReplayChannel(h, fs::Real, fc::Real, step::Int=1; noise=nothing)
-  fs = in_units(u"Hz", fs)
-  fc = in_units(u"Hz", fc)
+function BasebandReplayChannel(h, fs::Number, fc::Number, step::Int=1; noise=nothing)
   θ = Matrix{Float64}(undef, 0, 0)
   φ = Matrix{Float64}(undef, 0, 0)
   BasebandReplayChannel(h, θ, φ, fs, fc, step; noise)
@@ -118,7 +116,7 @@ If not specified, a random start time is chosen.
 function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noisy=true, fs=nothing, start=nothing)
   fs === nothing && x isa SampledSignal && (fs = framerate(x))
   L, M, T = size(ch.h)
-  maxtime = (T - 1) / ch.fs * ch.step
+  maxtime = ((T - 2) * ch.step - L + 1) / ch.fs
   txs === (:) && (txs = 1)
   rxs === (:) && (rxs = 1:M)
   ndims(rxs) == 0 && (rxs = [rxs])
@@ -135,7 +133,7 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
   x̄ = samples(resample(x .* cispi.(-2 * ch.fc * (0:nframes(x)-1) ./ fs), ch.fs/fs))
   # choose a random start time if not specified
   Treq = ceil(Int, (nframes(x̄) + L - 1) / ch.step) + 1
-  Treq < T || error("Signal duration ($(round(duration(x); digits=3)) s) exceeds maximum replayable duration ($(round(maxtime; digits=3)) s)")
+  Treq < T || error("Signal duration ($(round(duration(x); digits=3)) s) exceeds maximum replayable duration ($(floor(maxtime; digits=3)) s)")
   start = something(start, rand(1:T-Treq))
   1 ≤ start ≤ T - Treq || error("Invalid start index ($start ∉ 1:$(T-Treq))")
   # apply the channel
