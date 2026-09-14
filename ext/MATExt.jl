@@ -22,16 +22,16 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
   if haskey(data, "phi_hat")
     φ_data = data["phi_hat"]
     size(φ_data, 1) == M || error("Invalid phi_hat size")
-    φ = Float64.(transpose(φ_data[rxs,:]))
+    φ = transpose(φ_data[rxs,:])
   elseif haskey(data, "theta_hat")
     θ_data = data["theta_hat"]
     size(θ_data, 1) == M || error("Invalid theta_hat size")
-    θ = Float64.(transpose(θ_data[rxs,:]))
+    θ = transpose(θ_data[rxs,:])
   end
   fs = data["params"]["fs_delay"]
   fs_time = data["params"]["fs_time"]
   fc = data["params"]["fc"]
-  doppler = haskey(data, "f_resamp") ? Float64(only(data["f_resamp"])) : 1.0
+  doppler = haskey(data, "f_resamp") ? only(data["f_resamp"]) : 1.0
   ratio = fs / fs_time
   step = round(Int, ratio)
   isapprox(ratio, step; rtol=1e-9) || error("fs_delay/fs_time must be an integer ratio (got $ratio)")

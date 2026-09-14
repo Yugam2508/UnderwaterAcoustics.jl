@@ -340,3 +340,15 @@ end
   xlong = signal(zeros(nlong), FS_IN)
   @test_throws ErrorException transmit(ch, xlong; noisy=false)
 end
+
+@testitem "replay storage types" setup=[ReplaySetup] begin
+  # sampled data is stored as Float32 and scalars as Float64, and fs must not
+  # pass through Float32 on the way (24000.1 would become 24000.099609375)
+  ch = BasebandReplayChannel(make_h(TAPS), zeros(T * STEP, M), 24000.1, 12000.3, STEP)
+  @test ch.h isa Array{ComplexF32,3}
+  @test ch.θ isa Matrix{Float32}
+  @test ch.φ isa Matrix{Float32}
+  @test ch.fs === 24000.1
+  @test ch.fc === 12000.3
+  @test ch.doppler === 1.0
+end

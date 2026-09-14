@@ -4,25 +4,24 @@ import Interpolations: interpolate, BSpline, Cubic, Line, OnGrid, scale, extrapo
 
 export BasebandReplayChannel
 
-# Phase fields and fc are Float64 regardless of T1: the drift correction
-# (φ/2πfc ~ 1e-5 s) and the carrier phasor over long signals both lose
-# precision in Float32. h stays ComplexF32 to keep large channels in memory.
+# Sampled data (h, θ, φ) is stored as T1 = Float32. Scalars (fs, fc,
+# doppler) are Float64 because they set the time and frequency grids.
 struct BasebandReplayChannel{T1,T2} <: AbstractChannelModel
-  h::Array{Complex{T1},3}
-  θ::Matrix{Float64}
-  φ::Matrix{Float64}
-  fs::T1
-  fc::Float64
-  step::Int
-  doppler::Float64
-  noise::T2
+  h::Array{Complex{T1},3}   # channel impulse responses (delay × rx × time)
+  θ::Matrix{T1}             # theta_hat phase estimates (time × rx), or 0×0 if unused
+  φ::Matrix{T1}             # phi_hat phase estimates (time × rx), or 0×0 if unused
+  fs::Float64               # sampling frequency (Sa/s)
+  fc::Float64               # carrier frequency (Hz)
+  step::Int                 # step size for h time axis (fs ÷ step IRs/s)
+  doppler::Float64          # passband resampling factor (f_resamp)
+  noise::T2                 # noise model
   function BasebandReplayChannel(h, θ::AbstractMatrix, φ::AbstractMatrix, fs::Number, fc::Number, step::Int=1, doppler::Real=1.0; noise=nothing)
     fs = in_units(u"Hz", fs)
     fc = in_units(u"Hz", fc)
     h = ComplexF32.(h)
-    θ = Float64.(θ)
-    φ = Float64.(φ)
-    new{Float64,typeof(noise)}(h, θ, φ, Float32(fs), Float64(fc), step, Float64(doppler), noise)
+    θ = Float32.(θ)
+    φ = Float32.(φ)
+    new{Float32,typeof(noise)}(h, θ, φ, Float64(fs), Float64(fc), step, Float64(doppler), noise)
   end
 end
 
@@ -150,7 +149,7 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
     ȳ .*= cis.(φ_seg)
     t = range(0.0, step=1.0/ch.fs, length=nframes(ȳ))
     for (j, _) ∈ enumerate(rxs)
-      drift = Float64.(φ_seg[:, j] ./(2π * ch.fc))
+      drift = φ_seg[:, j] ./(2π * ch.fc)
       itp = extrapolate(scale(interpolate(@view(ȳ[:, j]), BSpline(Cubic(Line(OnGrid())))), t), 0.0)
       ȳ[:, j] .= itp.(t .+ drift)
     end
@@ -163,7 +162,7 @@ function transmit(ch::BasebandReplayChannel, x; txs=:, rxs=:, abstime=false, noi
   y = resample(ȳ, fs/ch.fs; dims=1)
   y .*= cispi.(2 * ch.fc * (0:nframes(y)-1) ./ fs)
   # resample in passband to reproduce the nominal Doppler offset, if needed
-  isone(ch.doppler) || (y = resample(y, Float64(ch.doppler); dims=1))
+  isone(ch.doppler) || (y = resample(y, ch.doppler; dims=1))
   input_was_analytic || (y = real(y) .* √2) # SignalAnalysis.analytic() is energy-preserving (divides by √2)
   y = signal(y, fs)
   # add noise
