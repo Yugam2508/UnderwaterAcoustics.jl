@@ -231,6 +231,14 @@ end
   # to a temporary .mat; only the reference output is committed, as plain text.
   # Regenerate with test/data/gen_references.py, which downloads the reference
   # implementation at a pinned commit.
+  #
+  # The residual (~2.6e-3 relative, amplitude ratio ~0.9988, the same in every
+  # mode) comes from the two resampling steps: DSP.jl's resample and scipy's
+  # resample_poly use different anti-aliasing filters, whose gains across the
+  # probe band differ by ~0.05-0.07% per step. Given identical input, the
+  # channel stage itself matches the reference to ~1e-7, apart from spline end
+  # effects at the first snapshot (≤ 6e-4, tv case). The tolerances below
+  # allow for that residual.
   using MAT: matwrite
 
   datadir = joinpath(@__DIR__, "data")
