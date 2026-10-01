@@ -1,5 +1,7 @@
 import Random: AbstractRNG
-import SignalAnalysis: RedGaussian, signal, db2amp
+import SignalAnalysis: RedGaussian, signal, db2amp, samples, framerate
+import DSP: conv
+import FFTW: ifft, fftshift
 import Interpolations: interpolate, extrapolate, Gridded, Flat, Throw, Interpolations
 import Interpolations: linear_interpolation, cubic_spline_interpolation
 
@@ -14,7 +16,8 @@ export ElasticFineSand, ElasticMuddySand, ElasticVeryFineSand, ElasticClayeySand
 export ElasticCoarseSilt, ElasticSandySilt
 export SeaState0, SeaState1, SeaState2, SeaState3, SeaState4, SeaState5
 export SeaState6, SeaState7, SeaState8, SeaState9, WhiteGaussianNoise, Linear
-export RedGaussianNoise, WindySurface, SampledField, ElasticBoundary, CubicSpline
+export RedGaussianNoise, GenericNoise, WindySurface, SampledField, ElasticBoundary
+export CubicSpline
 
 ################################################################################
 # boundary conditions
@@ -479,6 +482,51 @@ function Base.rand(rng::AbstractRNG, noise::RedGaussianNoise, nsamples::Integer,
     x[:,i] .= rand(rng, dist)
   end
   signal(x, fs)
+end
+
+"""
+    GenericNoise(σ=1)
+
+Create the generic ambient noise model of the underwater acoustic channel
+repository (UACR): Gaussian noise with variance `σ²` µPa², independent across
+receivers, whose power spectral density falls by 17 dB per decade. It serves
+channels without a site-specific `ReplayNoise` model.
+
+As in the UACR reference implementation, the noise is shaped by an 8191-tap
+filter centred on each sample, so its variance tapers to about `σ²/2` at the
+first and last samples, and averages about `0.8σ²` over a 1000-sample draw.
+"""
+struct GenericNoise{T<:AbstractFloat} <: AbstractNoiseModel
+  σ::T
+  function GenericNoise(σ=1.0)
+    σ = float(in_units(u"µPa", σ))
+    new{typeof(σ)}(σ)
+  end
+end
+
+function Base.rand(rng::AbstractRNG, noise::GenericNoise, nsamples::Integer; fs)
+  x = rand(rng, noise, nsamples, 1; fs)
+  signal(dropdims(samples(x); dims=2), framerate(x))
+end
+
+function Base.rand(rng::AbstractRNG, noise::GenericNoise, nsamples::Integer, nch::Integer; fs)
+  fs = in_units(u"Hz", fs)
+  T = typeof(noise.σ)
+  h = T.(_generic_noise_filter())
+  w = conv(randn(rng, T, nsamples, nch), reshape(h, :, 1))
+  # "same" convolution, as in the reference implementation
+  i = (length(h) - 1) ÷ 2
+  signal(noise.σ .* w[i+1:i+nsamples,:], fs)
+end
+
+# port of _noise_pink in the UACR reference implementation: -17 dB/decade on a
+# 4096-bin grid, as a centred unit-energy FIR filter; the grid's absolute frequencies
+# only scale the response, which the normalization removes, so it does not depend on fs
+function _generic_noise_filter()
+  nfft = 4096
+  H = sqrt.((1:nfft) .^ -1.7)
+  h = real(fftshift(ifft(vcat(H, reverse(H[2:end])))))
+  h ./ sqrt(sum(abs2, h))
 end
 
 ################################################################################

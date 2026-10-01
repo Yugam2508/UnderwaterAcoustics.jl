@@ -3,10 +3,9 @@ module MATExt
 using UnderwaterAcoustics
 import MAT: matread
 import SignalAnalysis: resample
-import UnderwaterAcoustics: BasebandReplayChannel
+import UnderwaterAcoustics: BasebandReplayChannel, ReplayNoise
 
 function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, noise)
-  # TODO: support UACR noise models
   data = matread(filename)
   all(["version", "h_hat", "params"] .∈ Ref(keys(data))) || error("Bad channel file format")
   data["version"] >= 1.0 || @warn "Unsupported channel file version"
@@ -16,6 +15,12 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
   rxs === (:) && (rxs = 1:M)
   ndims(rxs) == 0 && (rxs = [rxs])
   h = h[:,rxs,:]
+  if noise isa ReplayNoise
+    size(noise.β, 1) == M || error("Noise model has $(size(noise.β, 1)) receivers, but the channel file has $M")
+    noise.rxs == 1:M || noise.rxs == rxs ||
+      error("Noise model receivers ($(noise.rxs)) do not match the channel receivers ($rxs)")
+    noise = ReplayNoise(noise.β, noise.fs, noise.α; rxs)
+  end
   θ = Matrix{Float64}(undef, 0, 0)
   φ = Matrix{Float64}(undef, 0, 0)
   if haskey(data, "phi_hat")
@@ -48,6 +53,18 @@ function UnderwaterAcoustics._load_mat_replay_channel(filename, upsample, rxs, n
     end
   end
   BasebandReplayChannel(h, θ, φ, fs, fc, step, doppler; noise)
+end
+
+function UnderwaterAcoustics._load_mat_replay_noise(filename, rxs, σ)
+  data = matread(filename)
+  all(["version", "Fs", "alpha", "beta"] .∈ Ref(keys(data))) || error("Bad noise file format")
+  data["version"] >= 1.0 || @warn "Unsupported noise file version"
+  β = data["beta"]
+  # MATLAB drops the trailing lag dimension of a single-lag beta, and MAT reads 1×1 as a scalar
+  β isa Real && (β = fill(β, 1, 1))
+  ndims(β) == 2 && (β = reshape(β, size(β)..., 1))
+  ndims(β) == 3 || error("Invalid beta size $(size(β)) (expected [M, M, L+1])")
+  ReplayNoise(β, data["Fs"], data["alpha"]; rxs, σ)
 end
 
 end

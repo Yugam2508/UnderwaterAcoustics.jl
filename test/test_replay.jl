@@ -27,6 +27,16 @@ using TestItems
     h
   end
 
+  # asymmetry in (i,j) is what catches a transposed or permuted beta, since a
+  # symmetric one gives the same spatial covariance either way
+  function make_beta(m, nlags)
+    β = zeros(Float64, m, m, nlags)
+    for i ∈ 1:m, j ∈ 1:m, k ∈ 1:nlags
+      β[i,j,k] = cos(1.3i + 0.7j + 0.5k) / k
+    end
+    β
+  end
+
   # StableRNG so the probe is identical across Julia versions and platforms.
   function make_probe(seed=42)
     rng = StableRNG(seed)
@@ -306,6 +316,227 @@ end
   nlong = round(Int, T * STEP * FS_IN / FS_DELAY)
   xlong = signal(zeros(nlong), FS_IN)
   @test_throws ErrorException transmit(ch, xlong; noisy=false)
+end
+
+@testitem "replay noise statistics" setup=[ReplaySetup] begin
+  using Statistics: cov
+  # generating at the rate the statistics were measured at skips resampling, so
+  # the sample covariance can be compared against the closed form Σₖ βₖβₖᵀ
+  Mn, nlags, fs = 3, 4, 48_000.0
+  β = make_beta(Mn, nlags)
+  x = samples(rand(StableRNG(11), ReplayNoise(β, fs), 200_000, Mn; fs))
+  Σ = zeros(Mn, Mn)
+  for k ∈ 1:nlags
+    Σ .+= β[:,:,k] * transpose(β[:,:,k])
+  end
+  @test cov(x) ≈ Σ rtol=0.05
+  # the zero-lag covariance is blind to the direction of time; the lag-1 one is
+  # Σₖ βₖ₊₁βₖᵀ for the reference's forward indexing, and its transpose otherwise
+  R1 = transpose(x[1:end-1,:]) * x[2:end,:] ./ (size(x, 1) - 1)
+  Σ1 = zeros(Mn, Mn)
+  for k ∈ 1:nlags-1
+    Σ1 .+= β[:,:,k+1] * transpose(β[:,:,k])
+  end
+  @test R1 ≈ Σ1 rtol=0.05
+end
+
+@testitem "replay noise receivers" setup=[ReplaySetup] begin
+  Mn, fs = 4, 48_000.0
+  β = make_beta(Mn, 3)
+  # the innovations do not depend on rxs, so a subset must reproduce the
+  # corresponding receivers of the full array sample for sample
+  x_all = samples(rand(StableRNG(3), ReplayNoise(β, fs), 500, Mn; fs))
+  x_sub = samples(rand(StableRNG(3), ReplayNoise(β, fs; rxs=[3,1]), 500, 2; fs))
+  @test x_sub[:,1] ≈ x_all[:,3]
+  @test x_sub[:,2] ≈ x_all[:,1]
+  @test samples(rand(StableRNG(3), ReplayNoise(β, fs; σ=0.5), 500, Mn; fs)) ≈ 0.5 .* x_all
+  @test ndims(samples(rand(ReplayNoise(β, fs; rxs=2), 500; fs))) == 1
+  @test_throws ErrorException rand(ReplayNoise(β, fs), 500, 2; fs)
+  @test_throws ErrorException rand(ReplayNoise(β, fs), 500; fs)
+  @test_throws ErrorException ReplayNoise(β, fs; rxs=[1,1])
+  @test_throws ErrorException ReplayNoise(β, fs; rxs=[0])
+  @test_throws ErrorException ReplayNoise(β, fs; rxs=[Mn+1])
+  @test_throws ErrorException ReplayNoise(β, fs, 2.5)
+  @test_throws ErrorException ReplayNoise(β, fs, 0.05)
+  @test_throws ErrorException ReplayNoise(β, 0.0)
+  @test_throws ErrorException ReplayNoise(β, -fs)
+  @test_throws ErrorException ReplayNoise(zeros(2, 3, 4), fs)
+end
+
+@testitem "replay noise resampling" setup=[ReplaySetup] begin
+  β = make_beta(2, 3)
+  noise = ReplayNoise(β, 48_000.0)
+  for fs ∈ (24_000.0, 48_000.0, 96_000.0)
+    x = rand(StableRNG(5), noise, 1000, 2; fs)
+    @test size(x) == (1000, 2)
+    @test framerate(x) == fs
+    @test all(isfinite, samples(x))
+  end
+  # resampling rescales the spectrum, which moves the lag-1 autocorrelation from 0.48 at
+  # the measured rate to 0.83 at 96 kHz and 0.26 at 24 kHz; skipping the conversion
+  # would leave 0.48 at both, and inverting it would swap them
+  r1(x) = sum(x[1:end-1] .* x[2:end]) / sum(abs2, x)
+  @test r1(samples(rand(StableRNG(5), noise, 100_000, 2; fs=96_000.0))[:,1]) > 0.7
+  @test r1(samples(rand(StableRNG(5), noise, 100_000, 2; fs=24_000.0))[:,1]) < 0.35
+  noise32 = ReplayNoise(Float32.(β), 48_000.0)
+  for fs ∈ (24_000.0, 48_000.0, 96_000.0)
+    @test eltype(samples(rand(StableRNG(5), noise32, 1000, 2; fs))) === Float32
+  end
+end
+
+@testitem "replay noise impulsive" setup=[ReplaySetup] begin
+  using Statistics: mean
+  kurt(x) = mean(x .^ 4) / mean(x .^ 2)^2
+  # identity mixing leaves the innovations untouched, isolating the effect of α
+  β = zeros(2, 2, 1)
+  β[1,1,1] = β[2,2,1] = 1.0
+  fs = 48_000.0
+  x2 = samples(rand(StableRNG(9), ReplayNoise(β, fs, 2.0), 100_000, 2; fs))
+  x15 = samples(rand(StableRNG(9), ReplayNoise(β, fs, 1.5), 100_000, 2; fs))
+  @test mean(x2 .^ 2) ≈ 1 rtol=0.05
+  @test kurt(x2) ≈ 3 rtol=0.1
+  @test kurt(x15) > 10    # α-stable variates with α < 2 have infinite kurtosis
+  # kurtosis is blind to α and scale; the characteristic function of SαS with scale
+  # 1/√2 is exp(-|t/√2|^α), estimated here with std < 0.002, whereas α = 1 or a
+  # missing 1/√2 would shift it by more than 0.05
+  for t ∈ (1.0, 2.0)
+    @test mean(cos.(t .* x15)) ≈ exp(-abs(t / √2)^1.5) atol=0.01
+  end
+  # rand() substitutes randn for α = 2, which is valid only if _sαsrand reduces to the standard normal there
+  z = UnderwaterAcoustics._sαsrand(StableRNG(2), Float64, 200_000, 1, 2.0)
+  @test mean(z .^ 2) ≈ 1 rtol=0.05
+  # computing the draws in Float32 threw a DomainError within this many draws
+  @test all(isfinite, UnderwaterAcoustics._sαsrand(StableRNG(1), Float32, 5_000_000, 1, 1.5))
+  # Float32 cannot hold α = 0.1 variates, so the mixer must refuse rather than return Inf
+  @test_throws ErrorException rand(StableRNG(1), ReplayNoise(ones(Float32, 1, 1, 1), fs, 0.1), 100_000; fs)
+  @test all(isfinite, samples(rand(StableRNG(1), ReplayNoise(ones(1, 1, 1), fs, 0.1), 100_000; fs)))
+end
+
+@testitem "replay noise from file" setup=[ReplaySetup] begin
+  using MAT: matwrite
+  # MAT.jl writes this file in the loader's own [rx, rx, lag] convention, so it cannot
+  # catch a file stored in another axis order
+  β = make_beta(3, 4)
+  fs = 48_000.0
+  tmp = joinpath(tempdir(), "uacr_noise_test.mat")
+  # alpha is not the constructor's default, so a loader that dropped it would fail
+  matwrite(tmp, Dict("version" => 1.0, "Fs" => fs, "alpha" => 1.5, "beta" => β))
+  noise = ReplayNoise(tmp)
+  @test noise.β == β
+  @test noise.fs == fs
+  @test noise.α == 1.5
+  @test noise.rxs == 1:3
+  @test ReplayNoise(tmp; rxs=[2]).rxs == [2]
+  @test ReplayNoise(tmp; σ=2).β == 2 .* β
+  @test ReplayNoise(tmp; σ=2u"µPa").β == 2 .* β
+  x_file = samples(rand(StableRNG(7), noise, 500, 3; fs))
+  x_mem = samples(rand(StableRNG(7), ReplayNoise(β, fs, 1.5), 500, 3; fs))
+  @test x_file == x_mem
+
+  # MATLAB saves a single-lag beta as a matrix, or a scalar for one receiver
+  lag1 = joinpath(tempdir(), "uacr_noise_lag1.mat")
+  for β1 ∈ (β[:,:,1], 0.7)
+    matwrite(lag1, Dict("version" => 1.0, "Fs" => fs, "alpha" => 2.0, "beta" => β1))
+    @test ReplayNoise(lag1).β == reshape(β1 isa Real ? [β1] : β1, size(β1, 1), size(β1, 2), 1)
+  end
+  rm(lag1; force=true)
+
+  bad = joinpath(tempdir(), "uacr_noise_bad.mat")
+  matwrite(bad, Dict("version" => 1.0, "Fs" => fs))
+  @test_throws ErrorException ReplayNoise(bad)
+  @test_throws ErrorException ReplayNoise("noise.txt")
+
+  rm(tmp; force=true)
+  rm(bad; force=true)
+end
+
+@testitem "replay noise in channel" setup=[ReplaySetup] begin
+  using Statistics: mean
+  # 2 × FS_IN exercises the resampling path when transmit() draws the noise
+  noise = ReplayNoise(make_beta(M, 3), 2 * FS_IN)
+  ch = BasebandReplayChannel(make_h(TAPS), FS_DELAY, FC, STEP; noise)
+  x = signal(make_probe(), FS_IN)
+  y_clean = collect(transmit(ch, x; start=1, noisy=false))
+  y_noisy = collect(transmit(ch, x; start=1))
+  @test size(y_noisy) == size(y_clean)
+  @test y_noisy != y_clean
+  @test all(isfinite, y_noisy)
+
+  # noise powers of 1, 100 and 10⁴ show which receiver a transmit() subset is served
+  Mm = 3
+  h = zeros(ComplexF64, L, Mm, T)
+  for (idx, g) in TAPS; h[idx, :, :] .= g; end
+  β = zeros(Mm, Mm, 1)
+  for i ∈ 1:Mm; β[i,i,1] = 10.0^(i-1); end
+  ch3 = BasebandReplayChannel(h, FS_DELAY, FC, STEP; noise=ReplayNoise(β, FS_IN))
+  @test size(collect(transmit(ch3, x; start=1)), 2) == Mm
+  n2 = collect(transmit(ch3, x; rxs=[2], start=1)) .- collect(transmit(ch3, x; rxs=[2], start=1, noisy=false))
+  @test size(n2, 2) == 1
+  @test 50 < mean(abs2, n2) < 200
+  ch4 = BasebandReplayChannel(h, FS_DELAY, FC, STEP; noise=ReplayNoise(make_beta(4, 3), FS_IN))
+  @test_throws ErrorException transmit(ch4, x; start=1)
+end
+
+@testitem "replay noise with channel file" setup=[ReplaySetup] begin
+  using MAT: matwrite
+  using Statistics: mean
+  # receiver counts alone cannot tell [1,2] from [3,1], so the loader has to align
+  # the noise model with the channel's receivers
+  Mf, fs = 3, 48_000.0
+  h_file = zeros(ComplexF64, L, Mf, T)
+  for (idx, g) in TAPS; h_file[idx, :, :] .= g; end
+  tmp = joinpath(tempdir(), "uacr_noise_channel_test.mat")
+  matwrite(tmp, Dict(
+    "version" => 1.0,
+    "h_hat" => h_file,
+    "params" => Dict("fs_delay" => FS_DELAY, "fs_time" => FS_DELAY / STEP, "fc" => FC),
+  ))
+  # noise powers of 1, 100 and 10⁴ identify which file receiver each output gets,
+  # through the analytic branch of transmit() as well
+  βd = zeros(Mf, Mf, 1)
+  for i ∈ 1:Mf; βd[i,i,1] = 10.0^(i-1); end
+  ch = BasebandReplayChannel(tmp; rxs=[3,1], noise=ReplayNoise(βd, FS_IN))
+  @test ch.noise.rxs == [3,1]
+  x = analytic(signal(make_probe(), FS_IN))
+  n = collect(transmit(ch, x; start=1)) .- collect(transmit(ch, x; start=1, noisy=false))
+  @test 5e3 < mean(abs2, n[:,1]) < 2e4
+  @test 0.5 < mean(abs2, n[:,2]) < 2
+  n1 = collect(transmit(ch, x; rxs=[2], start=1)) .- collect(transmit(ch, x; rxs=[2], start=1, noisy=false))
+  @test 0.5 < mean(abs2, n1) < 2
+  β = make_beta(Mf, 3)
+  @test BasebandReplayChannel(tmp; rxs=[3,1], noise=ReplayNoise(β, fs; rxs=[3,1])).noise.rxs == [3,1]
+  @test BasebandReplayChannel(tmp; noise=ReplayNoise(β, fs)).noise.rxs == 1:Mf
+  @test_throws ErrorException BasebandReplayChannel(tmp; rxs=[3,1], noise=ReplayNoise(β, fs; rxs=[1,2]))
+  @test_throws ErrorException BasebandReplayChannel(tmp; noise=ReplayNoise(make_beta(2, 3), fs))
+  rm(tmp; force=true)
+end
+
+@testitem "replay generic noise" setup=[ReplaySetup] begin
+  using Statistics: mean, var, cov, cor
+  # size, slope and independence checks follow the reference's tests
+  fs = 48_000.0
+  @test sum(abs2, UnderwaterAcoustics._generic_noise_filter()) ≈ 1    # unit power
+  x = samples(rand(StableRNG(13), GenericNoise(), 500_000, 4; fs))
+  @test size(x) == (500_000, 4)
+  @test all(isfinite, x)
+  # most of the power sits at low frequencies, so there are few independent samples:
+  # the measured per-receiver variances span 0.92-1.10 and correlations reach 0.07
+  @test mean(var(x; dims=1)) ≈ 1 rtol=0.1
+  @test maximum(abs(cor(x)[i,j]) for i ∈ 1:4, j ∈ 1:4 if i != j) < 0.15
+  # Hann window and 8192-sample segments, as in the reference's scipy.signal.welch
+  p = welch_pgram(x[:,1], 8192; fs, window=hanning)
+  f, P = freq(p), power(p)
+  m = (f .>= 100) .& (f .<= 10_000)
+  lf, lp = log10.(f[m]), 10 .* log10.(P[m])
+  @test cov(lf, lp) / var(lf) ≈ -17 rtol=0.15    # measured -16.95
+  y = samples(rand(StableRNG(13), GenericNoise(2.0), 1000, 2; fs))
+  @test y ≈ 2 .* samples(rand(StableRNG(13), GenericNoise(), 1000, 2; fs))
+  # the reference's "same" convolution gives short draws less power (0.80σ² expected for
+  # 1000 samples, 0.785 measured); a causal slice would give 0.002 and a full-overlap one 0.95
+  z = samples(rand(StableRNG(13), GenericNoise(), 1000, 200; fs))
+  @test 0.7 < mean(abs2, z) < 0.9
+  @test ndims(samples(rand(GenericNoise(), 1000; fs))) == 1
+  @test eltype(samples(rand(GenericNoise(1f0), 1000, 2; fs))) === Float32
 end
 
 @testitem "replay storage types" setup=[ReplaySetup] begin
