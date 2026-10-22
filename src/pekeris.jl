@@ -242,17 +242,18 @@ function arrivals(pm::PekerisModeSolver, tx::AbstractAcousticSource)
       m = _mode(0, ω, 0.0, k₁, pm.c, pm.ρ, pm.seabed.c, pm.seabed.ρ, pm.h, log_a)
       return Vector{typeof(m)}(undef, 0)
     end
-    γ = _mode_cache_get(pm, ω)
-    if γ === nothing
-      dk² = k₁^2 - k₂^2
+    dk² = k₁^2 - k₂^2
+    γ₀ = _mode_cache_get(pm, _undual(ω))
+    if γ₀ === nothing
       ngrid = pm.ngrid > 0 ? pm.ngrid : 2 * ceil(Int, pm.h * k₁ / π) + 1
       γgrid = range(0, sqrt(dk²) - sqrt(eps()); length=ngrid)
       cost = map(γ -> _arrivals_cost(γ, (pm, dk²)), γgrid)
       ndx = findall(i -> sign(cost[i+1]) * sign(cost[i]) < 0, 1:length(γgrid)-1)
       0 < pm.nmodes < length(ndx) && (ndx = ndx[1:pm.nmodes])
-      γ = [_solve_mode_γ(γgrid[i], γgrid[i+1], pm, dk²) for i ∈ ndx]
-      _mode_cache_put!(pm, ω, γ)
+      γ₀ = [_solve_mode_γ(γgrid[i], γgrid[i+1], pm, dk²) for i ∈ ndx]
+      _mode_cache_put!(pm, _undual(ω), γ₀)
     end
+    γ = [g - _arrivals_cost(g, (pm, dk²)) / _arrivals_cost′(g, (pm, dk²)) for g ∈ γ₀]
     return _mode.(1:length(γ), ω, γ, k₁, pm.c, pm.ρ, pm.seabed.c, pm.seabed.ρ, pm.h, log_a)
   end
 end
@@ -455,14 +456,13 @@ function _bisect(f, lo::Float64, hi::Float64)
   0.5 * (lo + hi)
 end
 
-# solve _arrivals_cost(γ) = 0 in (γlo, γhi) on plain values, then apply one
-# Newton step with the original (possibly AD-tracked) parameters so that
-# derivatives propagate per the implicit function theorem
+# solve _arrivals_cost(γ) = 0 in (γlo, γhi) on plain values; arrivals() then applies
+# one Newton step with the original (possibly AD-tracked) parameters so that
+# derivatives propagate per the implicit function theorem, also for cached roots
 function _solve_mode_γ(γlo, γhi, pm, dk²)
   ρb = _undual(pm.seabed.ρ)
   ρ = _undual(pm.ρ)
   h = _undual(pm.h)
   d = _undual(dk²)
-  γ₀ = _bisect(γ -> ρb * γ * cos(γ * h) + ρ * sqrt(d - γ^2) * sin(γ * h), _undual(γlo), _undual(γhi))
-  γ₀ - _arrivals_cost(γ₀, (pm, dk²)) / _arrivals_cost′(γ₀, (pm, dk²))
+  _bisect(γ -> ρb * γ * cos(γ * h) + ρ * sqrt(d - γ^2) * sin(γ * h), _undual(γlo), _undual(γhi))
 end

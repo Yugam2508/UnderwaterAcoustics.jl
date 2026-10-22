@@ -289,6 +289,13 @@ end
     pm = PekerisModeSolver(env)
     transmission_loss(pm, AcousticSource((x=0.0, z=-d1), f), AcousticReceiver((x=R, z=-d2)))
   end
+  function ℳ₄((D, d1, f, c))
+    env = UnderwaterEnvironment(bathymetry = D, soundspeed = c, seabed = Rock)
+    pm = PekerisModeSolver(env)
+    tx = AcousticSource((x=0.0, z=-d1), f)
+    # the second call reuses cached modes
+    transmission_loss(pm, tx, AcousticReceiver((x=100.0, z=-10.0))) + transmission_loss(pm, tx, AcousticReceiver((x=300.0, z=-12.0)))
+  end
   x = [20.0, 100.0, 5.0, 10.0, 500.0, 1500.0]
   @test gradient(ℳ₁, AutoForwardDiff(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoForwardDiff(), x) ≈ gradient(ℳ₂, fd, x)
@@ -303,6 +310,8 @@ end
   @test gradient(ℳ₁, AutoZygote(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoZygote(), x) ≈ gradient(ℳ₂, fd, x)
   @test gradient(ℳ₃, AutoZygote(), x) ≈ gradient(ℳ₃, fd, x) atol=1e-4
+  x = [20.0, 5.0, 500.0, 1500.0]
+  @test gradient(ℳ₄, AutoZygote(), x) ≈ gradient(ℳ₄, fd, x)
 end
 
 @testitem "pekeris-modes-adiabatic" begin
