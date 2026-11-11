@@ -272,7 +272,7 @@ end
 
 @testitem "pekeris-modes-∂" begin
   using DifferentiationInterface
-  import ForwardDiff, FiniteDifferences, Zygote
+  import ForwardDiff, FiniteDifferences, Zygote, Mooncake, Enzyme
   fd = AutoFiniteDifferences(fdm=FiniteDifferences.central_fdm(5, 1))
   function ℳ₁((D, R, d1, d2, f, c))
     env = UnderwaterEnvironment(bathymetry = D, soundspeed = c, seabed = RigidBoundary)
@@ -303,6 +303,12 @@ end
   @test gradient(ℳ₁, AutoZygote(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoZygote(), x) ≈ gradient(ℳ₂, fd, x)
   @test gradient(ℳ₃, AutoZygote(), x) ≈ gradient(ℳ₃, fd, x)
+  @test gradient(ℳ₁, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₁, fd, x)
+  @test gradient(ℳ₂, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₂, fd, x)
+  @test gradient(ℳ₃, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₃, fd, x)
+  @test gradient(ℳ₁, AutoEnzyme(), x) ≈ gradient(ℳ₁, fd, x)
+  @test gradient(ℳ₂, AutoEnzyme(), x) ≈ gradient(ℳ₂, fd, x)
+  @test gradient(ℳ₃, AutoEnzyme(), x) ≈ gradient(ℳ₃, fd, x)
   x = [25.0, 200.0, 10.0, 8.0, 1000.0, 1540.0]
   @test gradient(ℳ₁, AutoForwardDiff(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoForwardDiff(), x) ≈ gradient(ℳ₂, fd, x)
@@ -310,8 +316,16 @@ end
   @test gradient(ℳ₁, AutoZygote(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoZygote(), x) ≈ gradient(ℳ₂, fd, x)
   @test gradient(ℳ₃, AutoZygote(), x) ≈ gradient(ℳ₃, fd, x) atol=1e-4
+  @test gradient(ℳ₁, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₁, fd, x)
+  @test gradient(ℳ₂, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₂, fd, x)
+  @test gradient(ℳ₃, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₃, fd, x) atol=1e-4
+  @test gradient(ℳ₁, AutoEnzyme(), x) ≈ gradient(ℳ₁, fd, x)
+  @test gradient(ℳ₂, AutoEnzyme(), x) ≈ gradient(ℳ₂, fd, x)
+  @test gradient(ℳ₃, AutoEnzyme(), x) ≈ gradient(ℳ₃, fd, x) atol=1e-4
   x = [20.0, 5.0, 500.0, 1500.0]
   @test gradient(ℳ₄, AutoZygote(), x) ≈ gradient(ℳ₄, fd, x)
+  @test gradient(ℳ₄, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₄, fd, x)
+  @test gradient(ℳ₄, AutoEnzyme(), x) ≈ gradient(ℳ₄, fd, x)
 end
 
 @testitem "pekeris-modes-adiabatic" begin
