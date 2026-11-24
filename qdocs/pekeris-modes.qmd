@@ -10,9 +10,9 @@ engine: julia
 | **Model** | `UnderwaterAcoustics.PekerisModeSolver` |
 | **Description** | Normal mode model for constant depth iso-velocity environments |
 | **Language** | Julia |
-| **Advantages** | Fast, differentiable (forward mode), multi-threaded |
+| **Advantages** | Fast, differentiable, multi-threaded |
 | **Limitations** | Iso-velocity, pressure-release surface, fluid half-space seabed, no seabed absorption (no leaky modes) |
-| **Differentiability** | `ForwardDiff` |
+| **Differentiability** | `ForwardDiff`, `Zygote`, `Mooncake`, `Enzyme` |
 
 : {tbl-colwidths="[25,75]"}
 
@@ -111,4 +111,4 @@ plot(impulse_response(pm, tx, rx, 8000; fmin=200, fmax=300))
 
 ## Notes
 
-- Differentiability currently works only with `ForwardDiff`, and excludes `impulse_response()`.
+- Differentiability currently excludes `impulse_response()`.

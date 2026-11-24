@@ -250,7 +250,7 @@ function arrivals(pm::PekerisModeSolver, tx::AbstractAcousticSource)
       cost = map(γ -> _arrivals_cost(γ, (pm, dk²)), γgrid)
       ndx = findall(i -> sign(cost[i+1]) * sign(cost[i]) < 0, 1:length(γgrid)-1)
       0 < pm.nmodes < length(ndx) && (ndx = ndx[1:pm.nmodes])
-      γ₀ = [_solve_mode_γ(γgrid[i], γgrid[i+1], pm, dk²) for i ∈ ndx]
+      γ₀ = _solve_mode_γ.(γgrid[ndx], γgrid[ndx .+ 1], Ref(pm), dk²)
       _mode_cache_put!(pm, _undual(ω), γ₀)
     end
     γ = [g - _arrivals_cost(g, (pm, dk²)) / _arrivals_cost′(g, (pm, dk²)) for g ∈ γ₀]
@@ -277,11 +277,12 @@ function acoustic_field(pm::PekerisModeSolver, tx::AbstractAcousticSource, rxs::
   kᵣ = [m.kᵣ for m ∈ modes]
   k = (2π * frequency(tx) / pm.c)
   k² = k^2
-  γ = sqrt.(k² .- kᵣ.^2)
+  γ = _csqrt.(k² .- kᵣ.^2)
+  skᵣ = _csqrt.(kᵣ)
   map(rxs) do rx
     p2 = location(rx)
     R = hypot(p1.x - p2.x, p1.y - p2.y)
-    modal_terms = @. sin(γ * -p1.z) * sin(γ * -p2.z) * cis(-kᵣ * R) / sqrt(kᵣ)
+    modal_terms = @. sin(γ * -p1.z) * sin(γ * -p2.z) * cis(-kᵣ * R) / skᵣ
     multiplier = cispi(-0.25) * 2 / pm.h * sqrt(2π / R)
     if mode === :coherent
       # conjugation required because we use the convention of cis(-kᵣR) to match with Kraken
@@ -404,6 +405,9 @@ struct Mode{T}
 end
 
 (m::Mode)(z) = m.C * sin(m.γ * -z)
+
+# AD friendly complex √
+_csqrt(z) = √abs(z) * cis(angle(z) / 2)
 
 function _mode(m, ω, γ, k, c, ρ, cb, ρb, D, log_a)
   kᵣ = complex(sqrt(k^2 - γ^2), log_a)

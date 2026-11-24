@@ -22,11 +22,13 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 Colors = "5ae59095-9a9b-59fe-a467-6f913c188581"
 MAT = "23992714-dd62-5051-b70f-ba57cb901cac"
+Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
 RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 
 [extensions]
 ChainRulesExt = "ChainRulesCore"
 MATExt = "MAT"
+MooncakeExt = "Mooncake"
 PlotsExt = ["RecipesBase", "Colors"]
 
 [compat]
@@ -42,6 +44,7 @@ Interpolations = "0.14,0.15,0.16"
 LinearAlgebra = "1"
 Logging = "1"
 MAT = "0.10.7, 0.11, 0.12"
+Mooncake = "0.5"
 Printf = "1"
 Random = "1"
 RecipesBase = "1.3"
