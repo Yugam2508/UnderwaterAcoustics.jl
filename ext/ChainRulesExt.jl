@@ -1,13 +1,19 @@
 module ChainRulesExt
 
 using ChainRulesCore
-import UnderwaterAcoustics: _arr2ir, tmap, _blackman, _bisect, _mode_cache_get, _mode_cache_put!
+import UnderwaterAcoustics: _arr2ir, tmap, _blackman, _bisect, _mode_cache_get, _mode_cache_put!, _depth_grid
 
 # the bisection root-find is value-only; derivatives are recovered by the
 # Newton polish step in arrivals (implicit function theorem)
 ChainRulesCore.@non_differentiable _bisect(f, lo, hi)
 ChainRulesCore.@non_differentiable _mode_cache_get(pm, ω)
 ChainRulesCore.@non_differentiable _mode_cache_put!(pm, ω, γ)
+
+function ChainRulesCore.rrule(::typeof(_depth_grid), z1, z2, n)
+  t = (0:n-1) / (n - 1)
+  _depth_grid_pullback(Δ) = (NoTangent(), sum((1 .- t) .* unthunk(Δ)), sum(t .* unthunk(Δ)), NoTangent())
+  _depth_grid(z1, z2, n), _depth_grid_pullback
+end
 
 function ChainRulesCore.rrule(config::RuleConfig{>:HasReverseMode}, ::typeof(tmap), f, X::AbstractArray)
   cache = tmap(X) do x

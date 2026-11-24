@@ -389,7 +389,7 @@ end
 
 @testitem "pekeris-modes-adiabatic-∂" begin
   using DifferentiationInterface
-  import ForwardDiff, FiniteDifferences
+  import ForwardDiff, FiniteDifferences, Zygote, Mooncake, Enzyme
   fd = AutoFiniteDifferences(fdm=FiniteDifferences.central_fdm(5, 1))
   function ℳ((D1, D2, R, d1, d2, f, c))
     env = UnderwaterEnvironment(
@@ -409,5 +409,15 @@ end
   # scale due to the internal depth-grid mode cache, so only the remaining components are
   # compared against a finite-difference reference
   @test ∇ℳ[3:7] ≈ gradient(ℳ, fd, x)[3:7] rtol=1e-4
-  # FIXME reverse mode (Zygote) unsupported: AdiabaticExt integration is mutation-heavy
+  @test gradient(ℳ, AutoMooncake(config=nothing), x) ≈ ∇ℳ
+  # Zygote and Enzyme do not differentiate w.r.t. the samples of a SampledField, so the bathymetry is fixed here
+  bathy = SampledField([201.3, 151.7, 201.3]; x=[0.0, 2000.0, 5000.0])
+  seabed = FluidBoundary(2000, 2000)
+  function ℳ′((R, d1, d2, f, c))
+    env = UnderwaterEnvironment(bathymetry=bathy, soundspeed=c, density=1000, seabed=seabed)
+    pm = AdiabaticExt(PekerisModeSolver, env; dx=10.0, dz=0.1)
+    transmission_loss(pm, AcousticSource((x=0.0, z=-d1), f), AcousticReceiver((x=R, z=-d2)))
+  end
+  @test gradient(ℳ′, AutoZygote(), x[3:7]) ≈ ∇ℳ[3:7]
+  @test gradient(ℳ′, AutoEnzyme(mode=Enzyme.set_runtime_activity(Enzyme.Reverse)), x[3:7]) ≈ ∇ℳ[3:7]
 end

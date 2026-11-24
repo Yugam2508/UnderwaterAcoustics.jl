@@ -18,8 +18,8 @@ azimuthal symmetry around the source. In `reciprocal` mode, the adiabatic
 computation is modified to ensure reciprocity, but azimuthal symmetry is lost.
 
 If the underlying `model` is differentiable, `AdiabaticExt` supports
-forward-mode automatic differentiation (e.g. ForwardDiff). Reverse-mode
-automatic differentiation is currently not supported.
+forward-mode (e.g. ForwardDiff) and reverse-mode (e.g. Zygote, Mooncake,
+Enzyme) automatic differentiation.
 """
 struct AdiabaticExt{T1,T2,T3} <: AbstractModePropagationModel
   env::T1
@@ -102,87 +102,36 @@ function acoustic_field(pm::AdiabaticExt, tx::AbstractAcousticSource, rxs::Abstr
   virtual_rx = AcousticReceiver(location(tx).x + max_r, 0, tx_depth)
   cache = _precompute_arrivals(pm, tx, tx_depth, virtual_rx, min_depth, max_depth, dz)
   # get x positions of interest
-  xs = unique!(sort!(map(rx -> location(rx).x, vec(rxs))))
-  ndx = map(x -> findall(rx -> location(rx).x == x, rxs), xs)
+  xs = unique(sort(map(rx -> location(rx).x, vec(rxs))))
+  ix = map(rx -> searchsortedfirst(xs, location(rx).x), rxs)
   x0 = location(tx).x
   z0 = -value(pm.env.bathymetry, (x=x0, y=0.0, z=0.0))
   i0 = something(findfirst(≥(x0), xs), length(xs)+1)
   tx_modes = _cached_arrivals(cache, z0, dz)
   m₁ = tx_modes[findfirst(!isnothing, tx_modes)]
   T = complex(promote_type(typeof(float(x0)), typeof(real(m₁.kᵣ)), typeof(real(m₁.ψ(location(tx).z)))))
+  zs = map(x -> -value(pm.env.bathymetry, (x=x, y=0.0, z=0.0)), xs)
+  rx_modes = map(z -> _cached_arrivals(cache, z, dz), zs)
   fld = zeros(T, size(rxs))
   for m ∈ eachindex(tx_modes)
-    kri = zeros(T, size(xs))
-    # compute kr-integral for all receivers on the right of the source
-    x = x0
-    for i ∈ i0:length(xs)
-      i > i0 && (kri[i] = kri[i-1])
-      m1 = _cached_arrivals(cache, -value(pm.env.bathymetry, (x=x, y=0.0, z=0.0)), dz)
-      while x < xs[i] - dx
-        x += dx
-        m2 = _cached_arrivals(cache, -value(pm.env.bathymetry, (x=x, y=0.0, z=0.0)), dz)
-        min(length(m1), length(m2)) < m && break
-        (m1[m] === nothing || m2[m] === nothing) && break
-        kri[i] += 0.5 * (m1[m].kᵣ + m2[m].kᵣ) * dx
-        m1 = m2
-      end
-      if x < xs[i]
-        m2 = _cached_arrivals(cache, -value(pm.env.bathymetry, (x=xs[i], y=0.0, z=0.0)), dz)
-        if x < xs[i] - dx || min(length(m1), length(m2)) < m
-          kri[i] = 0
-          break
-        end
-        kri[i] += 0.5 * (m1[m].kᵣ + m2[m].kᵣ) * (xs[i] - x)
-        x = xs[i]
-      end
+    kri = vcat(
+      reverse(_kr_integrals(cache, pm.env, m, x0, xs[i0-1:-1:1], dx, dz, T)),
+      _kr_integrals(cache, pm.env, m, x0, xs[i0:end], dx, dz, T))
+    A = map(eachindex(xs)) do i
+      (xs[i] == x0 || kri[i] == 0 || m > length(rx_modes[i])) && return zero(T)
+      tx_modes[m].ψ(location(tx).z) * cis(-kri[i]) /
+        _csqrt(pm.reciprocal ? kri[i] : rx_modes[i][m].kᵣ * abs(xs[i] - x0))
     end
-    # compute kr-integral for all receivers on the left of the source
-    x = x0
-    for i ∈ i0-1:-1:1
-      i < i0-1 && (kri[i] = kri[i+1])
-      m1 = _cached_arrivals(cache, -value(pm.env.bathymetry, (x=x, y=0.0, z=0.0)), dz)
-      while x > xs[i] + dx
-        x -= dx
-        m2 = _cached_arrivals(cache, -value(pm.env.bathymetry, (x=x, y=0.0, z=0.0)), dz)
-        min(length(m1), length(m2)) < m && break
-        (m1[m] === nothing || m2[m] === nothing) && break
-        kri[i] += 0.5 * (m1[m].kᵣ + m2[m].kᵣ) * dx
-        m1 = m2
-      end
-      if x > xs[i]
-        m2 = _cached_arrivals(cache, -value(pm.env.bathymetry, (x=xs[i], y=0.0, z=0.0)), dz)
-        if x > xs[i] + dx || min(length(m1), length(m2)) < m
-          kri[i] = 0
-          break
-        end
-        kri[i] += 0.5 * (m1[m].kᵣ + m2[m].kᵣ) * (x - xs[i])
-        x = xs[i]
-      end
-    end
-    # compute field contribution
-    for (x1, kri1, ndx1) ∈ zip(xs, kri, ndx)
-      if x1 == x0
-        fld[ndx1] .= NaN
-        continue
-      end
-      kri1 == 0 && continue
-      z = -value(pm.env.bathymetry, (x=x1, y=0.0, z=0.0))
-      rx_modes = _cached_arrivals(cache, z, dz)
-      if m ≤ length(rx_modes)
-        R = abs(x1 - x0)
-        A = tx_modes[m].ψ(location(tx).z) * cis(-kri1) /
-            sqrt(pm.reciprocal ? kri1 : rx_modes[m].kᵣ * R)
-        for j ∈ ndx1
-          zᵣ = location(rxs[j]).z
-          if zᵣ ≥ z
-            fld[j] += mode === :coherent ? A * rx_modes[m].ψ(zᵣ) : abs2(A * rx_modes[m].ψ(zᵣ))
-          end
-        end
-      end
+    fld = fld .+ map(rxs, ix) do rx, i
+      xs[i] == x0 && return T(NaN)
+      zᵣ = location(rx).z
+      (A[i] == 0 || zᵣ < zs[i]) && return zero(T)
+      p = A[i] * rx_modes[i][m].ψ(zᵣ)
+      T(mode === :coherent ? p : abs2(p))
     end
   end
-  mode === :coherent || (fld .= sqrt.(fld))
-  fld .*= sqrt(2π) * cispi(-0.25) * db2amp(spl(tx))
+  mode === :coherent || (fld = _csqrt.(fld))
+  fld = fld .* (sqrt(2π) * cispi(-0.25) * db2amp(spl(tx)))
   # conjugation required because we use the convention of cis(-kᵣR) to match with Kraken
   conj.(fld)
 end
@@ -193,8 +142,7 @@ _model(pm::AdiabaticExt{T1,T2,T3}) where {T1,T2,T3} = T3
 
 struct ModeCache{Tz,T}
   zs::Vector{Tz}
-  modes::Vector{Vector{T}}
-  ModeCache(Tz, T) = new{Tz,T}(Tz[], Vector{T}[])
+  modes::Vector{T}
 end
 
 function _cached_arrivals(cache, z, dz)
@@ -211,36 +159,44 @@ function _cached_arrivals(cache, z, dz)
   end
 end
 
-function _cache_arrivals(cache, z, v)
-  i = searchsortedfirst(cache.zs, z)
-  if i > length(cache.zs)
-    push!(cache.zs, z)
-    push!(cache.modes, v)
-  elseif cache.zs[i] == z
-    cache.modes[i] = v
-  else
-    insert!(cache.zs, i, z)
-    insert!(cache.modes, i, v)
+# trapezoid ∫kᵣdx of mode m from a to b, and whether the mode exists all the way
+function _kr_integral(cache, env, m, a, b, dx, dz, T)
+  right = a ≤ b
+  kri = zero(T)
+  x = a
+  m1 = _cached_arrivals(cache, -value(env.bathymetry, (x=x, y=0.0, z=0.0)), dz)
+  while right ? x < b - dx : x > b + dx
+    x = right ? x + dx : x - dx
+    m2 = _cached_arrivals(cache, -value(env.bathymetry, (x=x, y=0.0, z=0.0)), dz)
+    min(length(m1), length(m2)) < m && break
+    (m1[m] === nothing || m2[m] === nothing) && break
+    kri += 0.5 * (m1[m].kᵣ + m2[m].kᵣ) * dx
+    m1 = m2
   end
-  nothing
+  if right ? x < b : x > b
+    m2 = _cached_arrivals(cache, -value(env.bathymetry, (x=b, y=0.0, z=0.0)), dz)
+    ((right ? x < b - dx : x > b + dx) || min(length(m1), length(m2)) < m) && return kri, false
+    kri += 0.5 * (m1[m].kᵣ + m2[m].kᵣ) * (right ? b - x : x - b)
+  end
+  kri, true
+end
+
+function _kr_integrals(cache, env, m, x0, xs, dx, dz, T)
+  isempty(xs) && return zeros(T, 0)
+  seg = map(i -> _kr_integral(cache, env, m, i == 1 ? x0 : xs[i-1], xs[i], dx, dz, T), eachindex(xs))
+  n = something(findfirst(s -> !last(s), seg), length(seg) + 1) - 1
+  cumsum(map(first, seg)) .* (eachindex(seg) .≤ n)
 end
 
 function _precompute_arrivals(pm, tx, tx_depth, rx, min_depth, max_depth, dz)
   n = ceil(Int, (max_depth - min_depth) / 2dz) + 1
-  arr = _compute_arrivals(pm, tx, -tx_depth, rx)
-  Tz = promote_type(typeof(float(-tx_depth)), typeof(float(min_depth)), typeof(float(max_depth)))
-  cache = ModeCache(Tz, eltype(arr))
-  _cache_arrivals(cache, -tx_depth, arr)
-  for z ∈ range(-max_depth, -min_depth; length=n)
-    i = searchsortedlast(cache.zs, z)
-    if i == 0 || cache.zs[i] != z
-      arr = _compute_arrivals(pm, tx, z, rx)
-      _align_arrivals!(arr, cache.modes[max(1,i)])
-      _cache_arrivals(cache, z, arr)
-    end
-  end
-  cache
+  zs = _depth_grid(-max_depth, -min_depth, n)
+  i = searchsortedfirst(zs, -tx_depth)
+  zs = i ≤ n && zs[i] == -tx_depth ? zs : vcat(zs[1:i-1], -tx_depth, zs[i:n])
+  ModeCache(zs, map(z -> _compute_arrivals(pm, tx, z, rx), zs))
 end
+
+_depth_grid(z1, z2, n) = collect(range(z1, z2; length=n))
 
 function _compute_arrivals(pm, tx, z, rx)
   # compute arrivals for a water depth of z
@@ -248,8 +204,8 @@ function _compute_arrivals(pm, tx, z, rx)
     @set env.bathymetry = -z
   end
   pm1 = _model(pm)(env; pm.kwargs...)
-  arr = arrivals(pm1, tx, rx)
-  convert(Vector{Union{Nothing,eltype(arr)}}, arr)
+  # identity has an rrule, which lets Zygote pass zero tangents for unused modes
+  identity(arrivals(pm1, tx, rx))
 end
 
 function _align_arrivals!(arr1, arr0; candidates=3, corr_threshold=0.5, npts=101)
