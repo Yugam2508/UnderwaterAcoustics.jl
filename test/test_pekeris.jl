@@ -295,6 +295,12 @@ end
     tx = AcousticSource((x=0.0, z=-d1), f)
     transmission_loss(pm, tx, AcousticReceiver((x=100.0, z=-10.0))) + transmission_loss(pm, tx, AcousticReceiver((x=300.0, z=-12.0)))
   end
+  function ℳ₅((D, R, d1, d2, f, c))
+    env = UnderwaterEnvironment(bathymetry = D, soundspeed = c, seabed = Rock)
+    pm = PekerisModeSolver(env)
+    ir = impulse_response(pm, AcousticSource((x=0.0, z=-d1), f), AcousticReceiver((x=R, z=-d2)), 10000.0; abstime=true)
+    sum(abs2, samples(ir))
+  end
   x = [20.0, 100.0, 5.0, 10.0, 500.0, 1500.0]
   @test gradient(ℳ₁, AutoForwardDiff(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoForwardDiff(), x) ≈ gradient(ℳ₂, fd, x)
@@ -308,6 +314,11 @@ end
   @test gradient(ℳ₁, AutoEnzyme(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoEnzyme(), x) ≈ gradient(ℳ₂, fd, x)
   @test gradient(ℳ₃, AutoEnzyme(), x) ≈ gradient(ℳ₃, fd, x)
+  ∇ℳ₅ = gradient(ℳ₅, fd, x)
+  @test gradient(ℳ₅, AutoForwardDiff(), x) ≈ ∇ℳ₅
+  @test gradient(ℳ₅, AutoZygote(), x) ≈ ∇ℳ₅
+  @test gradient(ℳ₅, AutoMooncake(config=nothing), x) ≈ ∇ℳ₅
+  @test gradient(ℳ₅, AutoEnzyme(), x) ≈ ∇ℳ₅
   x = [25.0, 200.0, 10.0, 8.0, 1000.0, 1540.0]
   @test gradient(ℳ₁, AutoForwardDiff(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoForwardDiff(), x) ≈ gradient(ℳ₂, fd, x)
@@ -321,6 +332,11 @@ end
   @test gradient(ℳ₁, AutoEnzyme(), x) ≈ gradient(ℳ₁, fd, x)
   @test gradient(ℳ₂, AutoEnzyme(), x) ≈ gradient(ℳ₂, fd, x)
   @test gradient(ℳ₃, AutoEnzyme(), x) ≈ gradient(ℳ₃, fd, x) atol=1e-4
+  ∇ℳ₅ = gradient(ℳ₅, fd, x)
+  @test gradient(ℳ₅, AutoForwardDiff(), x) ≈ ∇ℳ₅ rtol=1e-6
+  @test gradient(ℳ₅, AutoZygote(), x) ≈ ∇ℳ₅ rtol=1e-6
+  @test gradient(ℳ₅, AutoMooncake(config=nothing), x) ≈ ∇ℳ₅ rtol=1e-6
+  @test gradient(ℳ₅, AutoEnzyme(), x) ≈ ∇ℳ₅ rtol=1e-6
   x = [20.0, 5.0, 500.0, 1500.0]
   @test gradient(ℳ₄, AutoZygote(), x) ≈ gradient(ℳ₄, fd, x)
   @test gradient(ℳ₄, AutoMooncake(config=nothing), x) ≈ gradient(ℳ₄, fd, x)

@@ -1,6 +1,5 @@
 import SignalAnalysis: signal, db2pow, tukey
 import DSP: nextfastfft
-import FFTW: ifft
 
 export PekerisRayTracer, PekerisModeSolver
 
@@ -274,7 +273,8 @@ function acoustic_field(pm::PekerisModeSolver, tx::AbstractAcousticSource, rxs::
   p1 = location(tx)
   # modes don't depend on the receiver, so we can compute based on any receiver
   modes = arrivals(pm, tx, first(rxs))
-  kᵣ = [m.kᵣ for m ∈ modes]
+  # typed even when there are no modes, which Zygote needs
+  kᵣ = isempty(modes) ? fieldtype(eltype(modes), :kᵣ)[] : [m.kᵣ for m ∈ modes]
   k = (2π * frequency(tx) / pm.c)
   k² = k^2
   γ = _csqrt.(k² .- kᵣ.^2)
@@ -341,7 +341,8 @@ function impulse_response(pm::AbstractModePropagationModel,
   p1 = location(tx)
   p2 = location(rx)
   R = hypot(p1.x - p2.x, p1.y - p2.y)
-  Δt = R / maximum(a -> a.v, arr) - acausal
+  v = [a.v for a ∈ arr]
+  Δt = R / maximum(v) - acausal
   apow = [abs2(cis(-R * a.kᵣ)) for a ∈ arr]
   θ = db2pow(-threshold)
   max_modes = findfirst(1:length(apow)) do i
@@ -349,19 +350,16 @@ function impulse_response(pm::AbstractModePropagationModel,
   end
   nmodes = something(nmodes, max_modes)
   nmodes = min(nmodes, max_modes, length(arr))
-  mintaps = ceil(Int, (R / arr[nmodes].v - R / arr[1].v) * fs) + 1
-  N = nextfastfft(round(Int, (1 + 2 * taper) * mintaps))
-  Δf = fs / N
-  f = (0:N-1) .* Δf
+  mintaps = ceil(Int, (R / v[nmodes] - R / v[1]) * fs) + 1
+  N = _nextfastfft(round(Int, (1 + 2 * taper) * mintaps))
+  f = map(i -> i * fs / N, 0:N-1)
   ndx = findall(fmin .< f .< fmax)
-  X = zeros(ComplexF64, N)
-  Threads.@threads for i ∈ ndx
-    tx1 = AcousticSource(location(tx), f[i+1])
-    X[i+1] = conj(acoustic_field(pm, tx1, rx))
-  end
-  X .*= cispi.(2f * Δt)
-  x = √2 * ifft(X)  # factor of √2 to account for energy only in +ve freq
-  taper > 0 && (x .*= tukey(length(x), taper))
+  n1 = isempty(ndx) ? N : first(ndx)
+  X = tmap(i -> conj(acoustic_field(pm, AcousticSource(location(tx), f[i+1]), rx)), ndx)
+  X = vcat(zeros(ComplexF64, n1), X, zeros(ComplexF64, N - n1 - length(ndx)))
+  X = X .* cispi.(2f .* Δt)
+  x = _bfft(X) .* (√2 / N)  # factor of √2 to account for energy only in +ve freq
+  taper > 0 && (x = x .* _tukey(length(x), taper))
   if abstime
     x = vcat(zeros(eltype(x), round(Int, Δt * fs)), x)
   end
@@ -376,6 +374,19 @@ function impulse_response(pm::AbstractModePropagationModel,
 end
 
 ### helpers
+
+# unnormalized inverse DFT (as FFTW.bfft) in plain Julia, so that AD tools can step through it
+function _bfft(x)
+  N = length(x)
+  N ≤ 1 && return x
+  p = findfirst(p -> N % p == 0, 2:N) + 1
+  S = map(r -> _bfft(x[r+1:p:N]), 0:p-1)
+  sum(r -> repeat(S[r+1], p) .* cispi.(2 .* mod.(r .* (0:N-1), N) ./ N), 0:p-1)
+end
+
+# integer FFT length and fixed window, wrapped so AD rules can skip them
+_nextfastfft(n) = nextfastfft(n)
+_tukey(n, α) = tukey(n, α)
 
 function _group_velocity(ω, γ, kᵣ, c, ρ, cb, ρb, D)
   cb == 0 && return real(c * c * kᵣ / ω)

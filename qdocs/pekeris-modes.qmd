@@ -108,7 +108,3 @@ We can also estimate a bandlimited impulse response from the propagation model:
 ```{julia}
 plot(impulse_response(pm, tx, rx, 8000; fmin=200, fmax=300))
 ```
-
-## Notes
-
-- Differentiability currently excludes `impulse_response()`.
